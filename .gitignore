@@ -1,0 +1,18 @@
+# Build
+
+build
+
+# Bin
+
+*.o
+
+# Sublime Text
+
+*.sublime-workspace
+
+# vs code
+
+/.vscode/*.log
+
+# Odin
+ols.json
