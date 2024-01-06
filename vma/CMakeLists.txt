@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5.0)
 project(engine VERSION 0.1.0 LANGUAGES C CXX)
 
-find_package(Vulkan REQUIRED FATAL_ERROR)
+find_package(Vulkan REQUIRED)
 
 include(FetchContent)
 
@@ -39,6 +39,23 @@ target_link_libraries(vma PUBLIC Vulkan::Vulkan)
 # We are passing the pointers to vma manually.
 add_compile_definitions(VMA_STATIC_VULKAN_FUNCTIONS=0)
 add_compile_definitions(VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
+
+# Split the version string into a list
+string(REPLACE "." ";" version_list ${Vulkan_VERSION})
+
+# list(GET version_list 0 major_version)
+list(GET version_list 1 minor_version)
+# list(GET version_list 2 patch_version)
+
+if (${minor_version} STREQUAL "3")
+	add_compile_definitions(VMA_VULKAN_VERSION=1003000)
+elseif (${minor_version} STREQUAL "2")
+	add_compile_definitions(VMA_VULKAN_VERSION=1002000)
+elseif (${minor_version} STREQUAL "1")
+	add_compile_definitions(VMA_VULKAN_VERSION=1001000)
+else()
+	add_compile_definitions(VMA_VULKAN_VERSION=1000000)
+endif()
 
 target_compile_definitions(vma
   PUBLIC
