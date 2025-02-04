@@ -39,23 +39,30 @@ Requirements:
 
 Follow the steps below to build VMA:
 
-1. **Using CMake**:
-   Define the `VMA_VULKAN_VERSION` option to specify the desired Vulkan version in the API
-   format (e.g., `1003000` for Vulkan 1.3).
+### Build Using CMake
 
-2. **Build Using Scripts**:
-   Use the provided build scripts to compile the project.
-   - **Windows**: Run `build.bat` with the minor version as the first argument (e.g.,
-     `build.bat 3` for Vulkan 1.3).
-   - **Linux/macOS**:
-     - Make the script executable by running:
+Define the `VMA_VULKAN_VERSION` option to specify the desired Vulkan version in the API format
+(e.g., `1003000` for Vulkan 1.3).
 
-       ```bash
-       chmod +x build.sh
-       ```
+### Build Using Scripts
 
-     - Run `build.sh` with the minor version as the first argument (e.g., `build.sh 3` for
-       Vulkan 1.3).
+Use the provided build scripts to compile the project.
+
+#### Windows
+
+Run `build.bat` with the minor version as the first argument (e.g., `build.bat 3` for Vulkan
+1.3).
+
+#### Linux/macOS
+
+Make the script executable by running:
+
+```bash
+chmod +x build.sh
+```
+
+Run `build.sh` with the minor version as the first argument (e.g., `build.sh 3` for Vulkan
+1.3).
 
 ## Naming Conventions
 
