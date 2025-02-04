@@ -1,6 +1,6 @@
 # Odin VMA
 
-Bindings for [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) in Odin Programming Language.
+Bindings for [Vulkan Memory Allocator][] **v3.2.0** in [Odin Programming Language][].
 
 ## Basic Usage
 
@@ -18,7 +18,8 @@ allocator_create_info: vma.Allocator_Create_Info = {
     vulkan_functions = &vma_vulkan_functions,
 }
 
-if res := vma.create_allocator(&allocator_create_info, &allocator); res != .SUCCESS {
+allocator: vma.Allocator = ---
+if res := vma.create_allocator(allocator_create_info, &allocator); res != .SUCCESS {
     log.errorf("Failed to Create Vulkan Memory Allocator: [%v]", res)
     return
 }
@@ -26,15 +27,35 @@ if res := vma.create_allocator(&allocator_create_info, &allocator); res != .SUCC
 defer vma.destroy_allocator(allocator)
 ```
 
-## Binaries
+## Building VMA
 
-The bindings comes with precompiled binary for Windows and Linux x64, you can find the libs in the `vma/lib` folder.
+Precompiled binaries are not available, but you can easily compile the library using the
+provided scripts.
 
-There is a `CMakeLists.txt` that you can use to build yourself.
+Follow the steps below to build VMA:
+
+1. **Using CMake**:
+   Define the `VMA_VULKAN_VERSION` option to specify the desired Vulkan version in the API
+   format (e.g., `1003000` for Vulkan 1.3).
+
+2. **Build Using Scripts**:
+   Use the provided build scripts to compile the project.
+   - **Windows**: Run `build.bat` with the minor version as the first argument (e.g.,
+     `build.bat 3` for Vulkan 1.3).
+   - **Linux/macOS**:
+     - Make the script executable by running:
+
+       ```bash
+       chmod +x build.sh
+       ```
+
+     - Run `build.sh` with the minor version as the first argument (e.g., `build.sh 3` for
+       Vulkan 1.3).
 
 ## Naming Conventions
 
-Types and values follow the [Odin Naming Convention](https://github.com/odin-lang/Odin/wiki/Naming-Convention). In general, `Ada_Case` for types and `snake_case` for values
+Types and values follow the [Odin Naming Convention][]. In general, `Ada_Case` for types and
+`snake_case` for values
 
 |                    | Case                                |
 | ------------------ | ----------------------------------- |
@@ -47,4 +68,8 @@ Types and values follow the [Odin Naming Convention](https://github.com/odin-lan
 
 ## License
 
-MIT license.
+MIT License - See [LICENSE](./LICENSE) file for details.
+
+[Vulkan Memory Allocator]: https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+[Odin Programming Language]: https://odin-lang.org/
+[Odin Naming Convention]: https://github.com/odin-lang/Odin/wiki/Naming-Convention
