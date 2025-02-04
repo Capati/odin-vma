@@ -267,7 +267,7 @@ Allocator_Create_Info :: struct {
 	// Informative callbacks for `vkAllocateMemory`, `vkFreeMemory`. Optional.
 	device_memory_callbacks:         ^Device_Memory_Callbacks,
 	heap_size_limit:                 [^]vk.DeviceSize,
-	vulkan_procedures:               ^Vulkan_Functions,
+	vulkan_functions:                ^Vulkan_Functions,
 	instance:                        vk.Instance,
 	vulkan_api_version:              u32,
 }
@@ -463,6 +463,7 @@ create_vulkan_procedures :: proc() -> (procedures: Vulkan_Functions) {
 
 	return
 }
+
 
 // odinfmt: disable
 @(default_calling_convention = "c")
