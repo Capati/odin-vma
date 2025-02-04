@@ -254,22 +254,23 @@ Vulkan_Functions :: struct {
 // Description of a Allocator to be created.
 Allocator_Create_Info :: struct {
 	// Flags for created allocator.
-	flags:                           Allocator_Create_Flags,
+	flags:                             Allocator_Create_Flags,
 	// Vulkan physical device.
-	physical_device:                 vk.PhysicalDevice,
+	physical_device:                   vk.PhysicalDevice,
 	// Vulkan device.
-	device:                          vk.Device,
+	device:                            vk.Device,
 	// Preferred size of a single `vk.DeviceMemory` block to be allocated from large heaps > 1
 	// GiB. Optional.
-	preferred_large_heap_block_size: vk.DeviceSize,
+	preferred_large_heap_block_size:   vk.DeviceSize,
 	// Custom CPU memory allocation callbacks. Optional.
-	allocation_callbacks:            ^vk.AllocationCallbacks,
+	allocation_callbacks:              ^vk.AllocationCallbacks,
 	// Informative callbacks for `vkAllocateMemory`, `vkFreeMemory`. Optional.
-	device_memory_callbacks:         ^Device_Memory_Callbacks,
-	heap_size_limit:                 [^]vk.DeviceSize,
-	vulkan_functions:                ^Vulkan_Functions,
-	instance:                        vk.Instance,
-	vulkan_api_version:              u32,
+	device_memory_callbacks:           ^Device_Memory_Callbacks,
+	heap_size_limit:                   [^]vk.DeviceSize,
+	vulkan_functions:                  ^Vulkan_Functions,
+	instance:                          vk.Instance,
+	vulkan_api_version:                u32,
+	type_external_memory_handle_types: ^vk.ExternalMemoryHandleTypeFlagsKHR,
 }
 
 // Information about existing #Allocator object.
@@ -463,6 +464,7 @@ create_vulkan_functions :: proc() -> (procedures: Vulkan_Functions) {
 
 	return
 }
+
 
 
 // odinfmt: disable
