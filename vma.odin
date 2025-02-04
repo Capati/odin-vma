@@ -432,7 +432,7 @@ Virtual_Allocation_Info :: struct {
 }
 
 // Bind vulkan procedures to vma.
-create_vulkan_procedures :: proc() -> (procedures: Vulkan_Functions) {
+create_vulkan_functions :: proc() -> (procedures: Vulkan_Functions) {
 	procedures = Vulkan_Functions {
 		get_physical_device_properties             = vk.GetPhysicalDeviceProperties,
 		get_physical_device_memory_properties      = vk.GetPhysicalDeviceMemoryProperties,
