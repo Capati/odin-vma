@@ -63,7 +63,8 @@ if [ ! -d "$VMA_GIT_PATH" ]; then
 fi
 
 # Create the implementation file
-echo "#define VMA_STATIC_VULKAN_FUNCTIONS 0" > "./$BUILD_DIR/vk_mem_alloc.cpp"
+echo "#define VMA_VULKAN_VERSION $VMA_VULKAN_VERSION" > "./$BUILD_DIR/vk_mem_alloc.cpp"
+echo "#define VMA_STATIC_VULKAN_FUNCTIONS 0" >> "./$BUILD_DIR/vk_mem_alloc.cpp"
 echo "#define VMA_DYNAMIC_VULKAN_FUNCTIONS 0" >> "./$BUILD_DIR/vk_mem_alloc.cpp"
 echo "#define VMA_IMPLEMENTATION" >> "./$BUILD_DIR/vk_mem_alloc.cpp"
 echo "#include \"vk_mem_alloc.h\"" >> "./$BUILD_DIR/vk_mem_alloc.cpp"
