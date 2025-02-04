@@ -32,6 +32,11 @@ defer vma.destroy_allocator(allocator)
 Precompiled binaries are not available, but you can easily compile the library using the
 provided scripts.
 
+Requirement:
+
+- `git` - Must be in the PATH
+- `Vulkan SDK` - You can get from [LunarXchange](https://vulkan.lunarg.com/)
+
 Follow the steps below to build VMA:
 
 1. **Using CMake**:
