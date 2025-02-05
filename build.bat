@@ -51,7 +51,7 @@ rem Print out the version for verification
 echo VMA_VULKAN_VERSION: !VMA_VULKAN_VERSION!
 
 rem Set the VMA version
-set VMA_VERSION=v3.2.0
+set VMA_VERSION=v3.2.1
 
 where /Q git.exe || (
 	echo Error: Ensure git is installed and added to your PATH.

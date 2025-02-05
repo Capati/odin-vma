@@ -50,7 +50,7 @@ find_package(Vulkan REQUIRED)
 include(FetchContent)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(VMA_VERSION "v3.2.0")
+set(VMA_VERSION "v3.2.1")
 
 message(STATUS "Fetching VulkanMemoryAllocator ${VMA_VERSION}")
 FetchContent_Declare(

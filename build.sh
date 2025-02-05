@@ -39,7 +39,7 @@ fi
 echo "VMA_VULKAN_VERSION: $VMA_VULKAN_VERSION"
 
 # Set the VMA version
-VMA_VERSION="v3.2.0"
+VMA_VERSION="v3.2.1"
 
 # Check if git is available
 if ! command -v git &> /dev/null; then
