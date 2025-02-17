@@ -12,14 +12,18 @@ when ODIN_OS == .Windows {
 	}
 } else when ODIN_OS == .Darwin {
 	when ODIN_ARCH == .amd64 {
+		@(extra_linker_flags="-lstdc++")
 		foreign import vma_lib "vma_darwin_x64.a"
 	} else when ODIN_ARCH == .arm64 {
+		@(extra_linker_flags="-lstdc++")
 		foreign import vma_lib "vma_darwin_arm64.a"
 	}
 } else when ODIN_OS == .Linux {
 	when ODIN_ARCH == .amd64 {
+		@(extra_linker_flags="-lstdc++")
 		foreign import vma_lib "vma_linux_x64.a"
 	} else when ODIN_ARCH == .arm64 {
+		@(extra_linker_flags="-lstdc++")
 		foreign import vma_lib "vma_linux_arm64.a"
 	}
 } else {
@@ -29,13 +33,97 @@ when ODIN_OS == .Windows {
 // Vendor
 import vk "vendor:vulkan"
 
-// Flags for created #Allocator.
+// Flags for created `Allocator`.
 Allocator_Create_Flags :: bit_set[Allocator_Create_Flag;u32]
 Allocator_Create_Flag :: enum u32 {
+	// Allocator and all objects created from it will not be synchronized
+	// internally, so you must  guarantee they are used from only one thread at a
+	// time or synchronized externally by you.
+	//
+	// Using this flag may increase performance because internal mutexes are not
+	// used.
 	Externally_Synchronized,
+
+	// Enables usage of `VK_KHR_dedicated_allocation` extension.
+	//
+	// The flag works only if `Allocator_Create_Info.vulkan_api_version ==
+	// vk.API_VERSION_1_0`. When it is `vk.API_VERSION_1_1`, the flag is ignored
+	// because the extension has been promoted to Vulkan 1.1.
+	//
+	// Using this extension will automatically allocate dedicated blocks of memory
+	// for some buffers and images instead of suballocating place for them out of
+	// bigger memory blocks (as if you explicitly used
+	// `Allocation_Create_Flag.Dedicated_Memory` flag) when it is recommended by
+	// the driver. It may improve performance on some GPUs.
+	//
+	// You may set this flag only if you found out that following device
+	// extensions are supported, you enabled them while creating Vulkan device
+	// passed as `Allocator_Create_Info.device`, and you want them to be used
+	// internally by this library:
+	//
+	// - `VK_KHR_get_memory_requirements2` (device extension)
+	// - `VK_KHR_dedicated_allocation` (device extension)
+	//
+	// When this flag is set, you can experience following warnings reported by
+	// Vulkan validation layer. You can ignore them.
+	//
+	// - vkBindBufferMemory(): Binding memory to buffer 0x2d but
+	// - vkGetBufferMemoryRequirements() has not been called on that buffer.
 	Khr_Dedicated_Allocation,
+
+	// Enables usage of `VK_KHR_bind_memory2` extension.
+	//
+	// The flag works only if `Allocator_Create_Info.vulkan_api_version ==
+	// vk.API_VERSION_1_0`. When it is `vk.API_VERSION_1_1`, the flag is ignored
+	// because the extension has been promoted to Vulkan 1.1.
+	//
+	// You may set this flag only if you found out that this device extension is
+	// supported, you enabled it while creating Vulkan device passed as
+	// `Allocator_Create_Info.device`, and you want it to be used internally by
+	// this library.
+	//
+	// The extension provides functions `vk.BindBufferMemory2KHR` and
+	// `vk.BindImageMemory2KHR`, which allow to pass a chain of `pNext` structures
+	// while binding. This flag is required if you use `pNext` parameter in
+	// `vk.aBindBufferMemory2()` or `vk.aBindImageMemory2()`.
 	Khr_Bind_Memory2,
+
+	// Enables usage of `VK_EXT_memory_budget` extension.
+	//
+	// You may set this flag only if you found out that this device extension is
+	// supported, you enabled it while creating Vulkan device passed as
+	// `Allocator_Create_Info.device`, and you want it to be used internally by
+	// this library, along with another instance extension
+	// `VK_KHR_get_physical_device_properties2`, which is required by it (or
+	// Vulkan 1.1, where this extension is promoted).
+	//
+	// The extension provides query for current memory usage and budget, which
+	// will probably be more accurate than an estimation used by the library
+	// otherwise.
 	Ext_Memory_Budget,
+
+	// Enables usage of `VK_AMD_device_coherent_memory` extension.
+	//
+	// You may set this flag only if you:
+	//
+	// - found out that this device extension is supported and enabled it while
+	//   creating Vulkan device passed as `Allocator_Create_Info.device`,
+	// - checked that
+	//   `vk.PhysicalDeviceCoherentMemoryFeaturesAMD.deviceCoherentMemory` is true
+	//   and set it while creating the Vulkan device,
+	// - want it to be used internally by this library.
+	//
+	// The extension and accompanying device feature provide access to memory
+	// types with `VK_MEMORY_PROPERTY_DEVICE_COHERENT_AMD` and
+	// `VK_MEMORY_PROPERTY_DEVICE_UNCACHED_AMD` flags. They are useful mostly for
+	// writing breadcrumb markers - a common method for debugging GPU
+	// crash/hang/TDR.
+	//
+	// When the extension is not enabled, such memory types are still enumerated,
+	// but their usage is illegal. To protect from this error, if you don't create
+	// the allocator with this flag, it will refuse to allocate any memory or
+	// create a custom pool in such memory type, returning
+	// `vk.ERROR_FEATURE_NOT_PRESENT`.
 	Amd_Device_Coherent_Memory,
 	Buffer_Device_Address,
 	Ext_Memory_Priority,
@@ -46,6 +134,8 @@ Allocator_Create_Flag :: enum u32 {
 
 // Intended usage of the allocated memory.
 Memory_Usage :: enum u32 {
+	// No intended memory usage specified. Use other members of
+	// `Allocation_Create_Info` to specify your requirements.
 	Unknown,
 	Gpu_Only,
 	Cpu_Only,
@@ -111,18 +201,22 @@ DEFRAGMENTATION_ALGORITHM_MASK :: Defragmentation_Flags {
 	.Algorithm_Extensive,
 }
 
-// Operation performed on single defragmentation move. See structure #VmaDefragmentationMove.
+// Operation performed on single defragmentation move. See structure
+// #VmaDefragmentationMove.
 Defragmentation_Move_Operation :: enum u32 {
-	// Buffer/image has been recreated at `dstTmpAllocation`, data has been copied, old
-	// buffer/image has been destroyed. `srcAllocation` should be changed to point to the new
-	// place. This is the default value set by vm.begin_defragmentation_pass().
+	// Buffer/image has been recreated at `dstTmpAllocation`, data has been
+	// copied, old buffer/image has been destroyed. `srcAllocation` should be
+	// changed to point to the new place. This is the default value set by
+	// vm.begin_defragmentation_pass().
 	Operation_Copy,
+
 	// Set this value if you cannot move the allocation. New place reserved at
 	// `dstTmpAllocation` will be freed. `srcAllocation` will remain unchanged.
 	Operation_Ignore,
-	// Set this value if you decide to abandon the allocation and you destroyed the
-	// buffer/image. New place reserved at `dstTmpAllocation` will be freed, along with
-	// `srcAllocation`, which will be destroyed.
+
+	// Set this value if you decide to abandon the allocation and you destroyed
+	// the buffer/image. New place reserved at `dstTmpAllocation` will be freed,
+	// along with `srcAllocation`, which will be destroyed.
 	Operation_Destroy,
 }
 
@@ -259,8 +353,8 @@ Allocator_Create_Info :: struct {
 	physical_device:                   vk.PhysicalDevice,
 	// Vulkan device.
 	device:                            vk.Device,
-	// Preferred size of a single `vk.DeviceMemory` block to be allocated from large heaps > 1
-	// GiB. Optional.
+	// Preferred size of a single `vk.DeviceMemory` block to be allocated from
+	// large heaps > 1 GiB. Optional.
 	preferred_large_heap_block_size:   vk.DeviceSize,
 	// Custom CPU memory allocation callbacks. Optional.
 	allocation_callbacks:              ^vk.AllocationCallbacks,
@@ -273,7 +367,7 @@ Allocator_Create_Info :: struct {
 	type_external_memory_handle_types: ^vk.ExternalMemoryHandleTypeFlagsKHR,
 }
 
-// Information about existing #Allocator object.
+// Information about existing `Allocator` object.
 Allocator_Info :: struct {
 	instance:        vk.Instance,
 	physical_device: vk.PhysicalDevice,
@@ -465,8 +559,6 @@ create_vulkan_functions :: proc() -> (procedures: Vulkan_Functions) {
 	return
 }
 
-
-
 // odinfmt: disable
 @(default_calling_convention = "c")
 foreign vma_lib {
@@ -480,24 +572,26 @@ foreign vma_lib {
 	@(link_name = "vmaDestroyAllocator")
 	destroy_allocator :: proc(allocator: Allocator) ---
 
-	// Returns information about existing `Allocator` object - handle to Vulkan device etc.
+	// Returns information about existing `Allocator` object - handle to Vulkan
+	// device etc.
 	//
-	// It might be useful if you want to keep just the `Allocator` handle and fetch other
-	// required handles to `vk.PhysicalDevice`, `vk.Device` etc. every time using this procedure.
+	// It might be useful if you want to keep just the `Allocator` handle and
+	// fetch other required handles to `vk.PhysicalDevice`, `vk.Device` etc. every
+	// time using this procedure.
 	@(link_name = "vmaGetAllocatorInfo")
 	get_allocator_info :: proc(
 		allocator: Allocator,
 		allocator_info: ^Allocator_Info) ---
 
-	// `vk.PhysicalDeviceProperties` are fetched from physicalDevice by the allocator. You can
-	// access it here, without fetching it again on your own.
+	// `vk.PhysicalDeviceProperties` are fetched from physicalDevice by the
+	// allocator. You can access it here, without fetching it again on your own.
 	@(link_name = "vmaGetPhysicalDeviceProperties")
 	get_physical_device_properties :: proc(
 		allocator: Allocator,
 		physical_device_properties: ^^vk.PhysicalDeviceProperties) ---
 
-	// `vk.PhysicalDeviceMemoryProperties` are fetched from physicalDevice by the allocator.
-	// You can access it here, without fetching it again on your own.
+	// `vk.PhysicalDeviceMemoryProperties` are fetched from physicalDevice by the
+	// allocator. You can access it here, without fetching it again on your own.
 	@(link_name = "vmaGetMemoryProperties")
 	get_memory_properties :: proc(
 		allocator: Allocator,
@@ -505,8 +599,8 @@ foreign vma_lib {
 
 	// Given Memory Type Index, returns Property Flags of this memory type.
 	//
-	// This is just a convenience procedure. Same information can be obtained using
-	// `get_memory_properties()`.
+	// This is just a convenience procedure. Same information can be obtained
+	// using `get_memory_properties()`.
 	@(link_name = "vmaGetMemoryTypeProperties")
 	get_memory_type_properties :: proc(
 		allocator: Allocator,
@@ -521,29 +615,30 @@ foreign vma_lib {
 
 	// Retrieves statistics from current state of the Allocator.
 	//
-	// This procedure is called "calculate" not "get" because it has to traverse all internal
-	// data structures, so it may be quite slow. Use it for debugging purposes. For faster but
-	// more brief statistics suitable to be called every frame or every allocation, use
-	// `get_heap_budgets()`.
+	// This procedure is called "calculate" not "get" because it has to traverse
+	// all internal data structures, so it may be quite slow. Use it for debugging
+	// purposes. For faster but more brief statistics suitable to be called every
+	// frame or every allocation, use `get_heap_budgets()`.
 	//
-	// Note that when using allocator from multiple threads, returned information may
-	// immediately become outdated.
+	// Note that when using allocator from multiple threads, returned information
+	// may immediately become outdated.
 	@(link_name = "vmaCalculateStatistics")
 	calculate_statistics :: proc(
 		allocator: Allocator,
 		stats: ^Total_Statistics) ---
 
-	// Retrieves information about current memory usage and budget for all memory heaps.
+	// Retrieves information about current memory usage and budget for all memory
+	// heaps.
 	//
-	// `budgets` must point to array with number of elements at least equal to number of
-	// memory heaps in physical device used.
+	// `budgets` must point to array with number of elements at least equal to
+	// number of memory heaps in physical device used.
 	//
-	// This procedure is called "get" not "calculate" because it is very fast, suitable to be
-	// called every frame or every allocation. For more detailed statistics use
-	// `calculate_statistics()`.
+	// This procedure is called "get" not "calculate" because it is very fast,
+	// suitable to be called every frame or every allocation. For more detailed
+	// statistics use `calculate_statistics()`.
 	//
-	// Note that when using allocator from multiple threads, returned information may
-	// immediately become outdated.
+	// Note that when using allocator from multiple threads, returned information
+	// may immediately become outdated.
 	@(link_name = "vmaGetHeapBudgets")
 	get_heap_budgets :: proc(
 		allocator: Allocator,
@@ -557,13 +652,15 @@ foreign vma_lib {
 	// - Is allowed by `memory_type_bits`.
 	// - Contains all the flags from `allocation_create_info.required_flags`.
 	// - Matches intended usage.
-	// - Has as many flags from `allocation_create_info.preferred_flags` as possible.
+	// - Has as many flags from `allocation_create_info.preferred_flags` as
+	//   possible.
 	//
-	// Returns `ERROR_FEATURE_NOT_PRESENT` if not found. Receiving such result from this
-	// PROCEDURE or any other allocating PROCEDURE probably means that your device doesn't
-	// support any memory type with requested features for the specific type of resource you
-	// want to use it for. Please check parameters of your resource, like image layout (OPTIMAL
-	// versus LINEAR) or mip level count.
+	// Returns `ERROR_FEATURE_NOT_PRESENT` if not found. Receiving such result
+	// from this PROCEDURE or any other allocating PROCEDURE probably means that
+	// your device doesn't support any memory type with requested features for the
+	// specific type of resource you want to use it for. Please check parameters
+	// of your resource, like image layout (OPTIMAL versus LINEAR) or mip level
+	// count.
 	@(link_name = "vmaFindMemoryTypeIndex")
 	find_memory_type_index :: proc(
 		allocator: Allocator,
@@ -575,8 +672,8 @@ foreign vma_lib {
 	// `Allocation_Create_Info`.
 	//
 	// It can be useful e.g. to determine value to be used as
-	// `Pool_Create_Info.memory_type_index`. It internally creates a temporary, dummy buffer
-	// that never has memory bound.
+	// `Pool_Create_Info.memory_type_index`. It internally creates a temporary,
+	// dummy buffer that never has memory bound.
 	@(link_name = "vmaFindMemoryTypeIndexForBufferInfo")
 	find_memory_type_index_for_buffer_info :: proc(
 		allocator: Allocator,
@@ -587,7 +684,8 @@ foreign vma_lib {
 	// Find `memory_type_index`, given `vk.ImageCreateInfo` and `Allocation_Create_Info`.
 	//
 	// It can be useful e.g. to determine value to be used as
-	// `Pool_Create_Info.memory_type_index`. It internally creates a temporary, dummy image
+	// `Pool_Create_Info.memory_type_index`. It internally creates a temporary,
+	// dummy image
 	// that never has memory bound.
 	@(link_name = "vmaFindMemoryTypeIndexForImageInfo")
 	find_memory_type_index_for_image_info :: proc(
@@ -611,8 +709,8 @@ foreign vma_lib {
 
 	// Retrieves statistics of existing `Pool` object.
 	//
-	// Note that when using the pool from multiple threads, returned information may
-	// immediately become outdated.
+	// Note that when using the pool from multiple threads, returned information
+	// may immediately become outdated.
 	@(link_name = "vmaGetPoolStatistics")
 	get_pool_statistics :: proc(
 		allocator: Allocator,
@@ -626,8 +724,8 @@ foreign vma_lib {
 		pool: Pool,
 		pool_stats: ^Detailed_Statistics) ---
 
-	// Checks magic number in margins around all allocations in given memory pool in search for
-	// corruptions.
+	// Checks magic number in margins around all allocations in given memory pool
+	// in search for corruptions.
 	@(link_name = "vmaCheckPoolCorruption")
 	check_pool_corruption :: proc(
 		allocator: Allocator,
@@ -635,9 +733,10 @@ foreign vma_lib {
 
 	// Retrieves name of a custom pool.
 	//
-	// After the call `name` is either nil or points to an internally-owned `nil`-terminated
-	// string containing name of the pool that was previously set. The pointer becomes invalid
-	// when the pool is destroyed or its name is changed using `set_pool_name()`.
+	// After the call `name` is either nil or points to an internally-owned
+	// `nil`-terminated string containing name of the pool that was previously
+	// set. The pointer becomes invalid when the pool is destroyed or its name is
+	// changed using `set_pool_name()`.
 	@(link_name = "vmaGetPoolName")
 	get_pool_name :: proc(
 		allocator: Allocator,
@@ -646,9 +745,9 @@ foreign vma_lib {
 
 	// Sets name of a custom pool.
 	//
-	// `name` can be either nil or pointer to a `nil`-terminated string with new name for the
-	// pool. Procedure makes internal copy of the string, so it can be changed or freed
-	// immediately after this call.
+	// `name` can be either nil or pointer to a `nil`-terminated string with new
+	// name for the pool. Procedure makes internal copy of the string, so it can
+	// be changed or freed immediately after this call.
 	@(link_name = "vmaSetPoolName")
 	set_pool_name :: proc(
 		allocator: Allocator,
@@ -662,13 +761,14 @@ foreign vma_lib {
 	// - `memory_requirements`
 	// - `create_info`
 	// - [out] `allocation` Handle to allocated memory.
-	// - [out] `allocation_info` Optional. Information about allocated memory. It can be later
-	//   fetched using PROCEDURE `get_allocation_info()`.
+	// - [out] `allocation_info` Optional. Information about allocated memory. It
+	//   can be later fetched using PROCEDURE `get_allocation_info()`.
 	//
 	// You should free the memory using `free_memory()` or `free_memory_pages()`.
 	//
-	// It is recommended to use `allocate_memory_for_buffer()`, `allocate_memory_for_image()`,
-	// `create_buffer()`, `create_image()` instead whenever possible.
+	// It is recommended to use `allocate_memory_for_buffer()`,
+	// `allocate_memory_for_image()`, `create_buffer()`, `create_image()` instead
+	// whenever possible.
 	@(link_name = "vmaAllocateMemory")
 	allocate_memory :: proc(
 		allocator: Allocator,
@@ -683,22 +783,24 @@ foreign vma_lib {
 	// - `vk_memory_requirements` Memory requirements for each allocation.
 	// - `create_info` Creation parameters for each allocation.
 	// - `allocation_count` Number of allocations to make.
-	// - [out] `allocations` Pointer to array that will be filled with handles to created
-	//   allocations.
-	// - [out] `allocation_info` Optional. Pointer to array that will be filled with
-	//   parameters of created allocations.
+	// - [out] `allocations` Pointer to array that will be filled with handles to
+	//   created allocations.
+	// - [out] `allocation_info` Optional. Pointer to array that will be filled
+	//   with parameters of created allocations.
 	//
 	// You should free the memory using `free_memory()` or `free_memory_pages()`.
 	//
-	// Word "pages" is just a suggestion to use this PROCEDURE to allocate pieces of memory
-	// needed for sparse binding. It is just a general purpose allocation PROCEDURE able to
-	// make multiple allocations at once. It may be internally optimized to be more efficient
-	// than calling `allocate_memory()` `allocationCount` times.
+	// Word "pages" is just a suggestion to use this PROCEDURE to allocate pieces
+	// of memory needed for sparse binding. It is just a general purpose
+	// allocation PROCEDURE able to make multiple allocations at once. It may be
+	// internally optimized to be more efficient than calling `allocate_memory()`
+	// `allocationCount` times.
 	//
-	// All allocations are made using same parameters. All of them are created out of the same
-	// memory pool and type. If any allocation fails, all allocations already made within this
-	// PROCEDURE call are also freed, so that when returned result is not `.SUCCESS`,
-	// `allocations` array is always entirely filled with `VK_NULL_HANDLE`.
+	// All allocations are made using same parameters. All of them are created out
+	// of the same memory pool and type. If any allocation fails, all allocations
+	// already made within this PROCEDURE call are also freed, so that when
+	// returned result is not `.SUCCESS`, `allocations` array is always entirely
+	// filled with `VK_NULL_HANDLE`.
 	@(link_name = "vmaAllocateMemoryPages")
 	allocate_memory_pages :: proc(
 		allocator: Allocator,
@@ -714,13 +816,14 @@ foreign vma_lib {
 	// - `buffer`
 	// - `create_info`
 	// - [out] `allocation` Handle to allocated memory.
-	// - [out] `allocation_info` Optional. Information about allocated memory. It can be later
-	//   fetched using procedure `get_allocation_info()`.
+	// - [out] `allocation_info` Optional. Information about allocated memory. It
+	//   can be later fetched using procedure `get_allocation_info()`.
 	//
 	// It only creates #VmaAllocation. To bind the memory to the buffer, use
 	// `bind_buffer_memory()`.
 	//
-	// This is a special-purpose procedure. In most cases you should use `create_buffer()`.
+	// This is a special-purpose procedure. In most cases you should use
+	// `create_buffer()`.
 	//
 	// You must free the allocation using `free_memory()` when no longer needed.
 	@(link_name = "vmaAllocateMemoryForBuffer")
@@ -737,13 +840,14 @@ foreign vma_lib {
 	// - `image`
 	// - `create_info`
 	// - [out] `allocation` Handle to allocated memory.
-	// - [out] `allocation_info` Optional. Information about allocated memory. It can be later
-	//   fetched using procedure `get_allocation_info()`.
+	// - [out] `allocation_info` Optional. Information about allocated memory. It
+	//   can be later fetched using procedure `get_allocation_info()`.
 	//
 	// It only creates #VmaAllocation. To bind the memory to the buffer, use
 	// `bind_image_memory()`.
 	//
-	// This is a special-purpose procedure. In most cases you should use `create_image()`.
+	// This is a special-purpose procedure. In most cases you should use
+	// `create_image()`.
 	//
 	// You must free the allocation using `free_memory()` when no longer needed.
 	@(link_name = "vmaAllocateMemoryForImage")
@@ -757,7 +861,8 @@ foreign vma_lib {
 	// Frees memory previously allocated using `allocate_memory()`,
 	// `allocate_memory_for_buffer()`, or `allocate_memory_for_image()`.
 	//
-	// Passing `nil` as `allocation` is valid. Such procedure call is just skipped.
+	// Passing `nil` as `allocation` is valid. Such procedure call is just
+	// skipped.
 	@(link_name = "vmaFreeMemory")
 	free_memory :: proc(
 		allocator: Allocator,
@@ -765,14 +870,16 @@ foreign vma_lib {
 
 	// Frees memory and destroys multiple allocations.
 	//
-	// Word "pages" is just a suggestion to use this procedure to free pieces of memory used
-	// for sparse binding. It is just a general purpose procedure to free memory and destroy
-	// allocations made using e.g. `allocate_memory()`, `allocate_memory_pages()` and other
-	// procedures. It may be internally optimized to be more efficient than calling
-	// `free_memory()` `allocation_count` times.
+	// Word "pages" is just a suggestion to use this procedure to free pieces of
+	// memory used for sparse binding. It is just a general purpose procedure to
+	// free memory and destroy allocations made using e.g. `allocate_memory()`,
+	// `allocate_memory_pages()` and other procedures. It may be internally
+	// optimized to be more efficient than calling `free_memory()`
+	// `allocation_count` times.
 	//
-	// Allocations in `allocations` array can come from any memory pools and types. Passing
-	// `nil` as elements of `allocations` array is valid. Such entries are just skipped.
+	// Allocations in `allocations` array can come from any memory pools and
+	// types. Passing `nil` as elements of `allocations` array is valid. Such
+	// entries are just skipped.
 	@(link_name = "vmaFreeMemoryPages")
 	free_memory_pages :: proc(
 		allocator: Allocator,
@@ -783,13 +890,15 @@ foreign vma_lib {
 	//
 	// Current parameters of given allocation are returned in `allocation_info`.
 	//
-	// Although this procedure doesn't lock any mutex, so it should be quite efficient, you
-	// should avoid calling it too often. You can retrieve same `Allocation_Info` structure
-	// while creating your resource, from procedure `create_buffer()`, `create_image()`. You
-	// can remember it if you are sure parameters don't change (e.g. due to defragmentation).
+	// Although this procedure doesn't lock any mutex, so it should be quite
+	// efficient, you should avoid calling it too often. You can retrieve same
+	// `Allocation_Info` structure while creating your resource, from procedure
+	// `create_buffer()`, `create_image()`. You can remember it if you are sure
+	// parameters don't change (e.g. due to defragmentation).
 	//
-	// There is also a new procedure `get_allocation_info2()` that offers extended information
-	// about the allocation, returned using new structure `Allocation_Info2`.
+	// There is also a new procedure `get_allocation_info2()` that offers extended
+	// information about the allocation, returned using new structure
+	// `Allocation_Info2`.
 	@(link_name = "vmaGetAllocationInfo")
 	get_allocation_info :: proc(
 		allocator: Allocator,
@@ -798,10 +907,10 @@ foreign vma_lib {
 
 	// Returns extended information about specified allocation.
 	//
-	// Current parameters of given allocation are returned in `allocation_info`. Extended
-	// parameters in structure `Allocation_Info2` include memory block size and a flag telling
-	// whether the allocation has dedicated memory. It can be useful e.g. for interop with
-	// OpenGL.
+	// Current parameters of given allocation are returned in `allocation_info`.
+	// Extended parameters in structure `Allocation_Info2` include memory block
+	// size and a flag telling whether the allocation has dedicated memory. It can
+	// be useful e.g. for interop with OpenGL.
 	@(link_name = "vmaGetAllocationInfo2")
 	get_allocation_info2 :: proc(
 		allocator: Allocator,
@@ -810,9 +919,9 @@ foreign vma_lib {
 
 	// Sets user_data in given allocation to new value.
 	//
-	// The value of pointer `user_data` is copied to allocation's `user_data`. It is opaque, so
-	// you can use it however you want - e.g. as a pointer, ordinal number or some handle to
-	// you own data.
+	// The value of pointer `user_data` is copied to allocation's `user_data`. It
+	// is opaque, so you can use it however you want - e.g. as a pointer, ordinal
+	// number or some handle to you own data.
 	@(link_name = "vmaSetAllocationUserData")
 	set_allocation_user_data :: proc(
 		allocator: Allocator,
@@ -821,43 +930,46 @@ foreign vma_lib {
 
 	// Sets name in given allocation to new value.
 	//
-	// `name` must be either `nil`, or a pointer to a `nil`-terminated string. The procedure makes
-	// a local copy of the string and sets it as allocation's `name`. The string passed as
-	// `name` doesn't need to be valid for the whole lifetime of the allocation - you can free
-	// it after this call. The string previously pointed to by allocation's `name` is freed
-	// from memory.
+	// `name` must be either `nil`, or a pointer to a `nil`-terminated string. The
+	// procedure makes a local copy of the string and sets it as allocation's
+	// `name`. The string passed as `name` doesn't need to be valid for the whole
+	// lifetime of the allocation - you can free it after this call. The string
+	// previously pointed to by allocation's `name` is freed from memory.
 	@(link_name = "vmaSetAllocationName")
 	set_allocation_name :: proc(
 		allocator: Allocator,
 		allocation: Allocation,
 		name: cstring) ---
 
-	// Given an allocation, returns Win32 handle that may be imported by other processes or
-	// APIs.
+	// Given an allocation, returns Win32 handle that may be imported by other
+	// processes or APIs.
 	//
-	// -  `target_process` Must be a valid handle to target process or null. If it's null, the
-	//    procedure returns handle for the current process.
+	// -  `target_process` Must be a valid handle to target process or null. If
+	//    it's null, the procedure returns handle for the current process.
 	// - [out] `handle` Output parameter that returns the handle.
 	//
-	// The procedure fills `handle` with handle that can be used in target process. The handle
-	// is fetched using procedure `vk.GetMemoryWin32HandleKHR`. When no longer needed, you must
-	// close it using:
+	// The procedure fills `handle` with handle that can be used in target
+	// process. The handle is fetched using procedure
+	// `vk.GetMemoryWin32HandleKHR`. When no longer needed, you must close it
+	// using:
 	//
 	// ```
 	// win32.CloseHandle(handle)
 	// ```
 	//
-	// You can close it any time, before or after destroying the allocation object. It is
-	// reference-counted internally by Windows.
+	// You can close it any time, before or after destroying the allocation
+	// object. It is reference-counted internally by Windows.
 	//
-	// Note the handle is returned for the entire `vk.DeviceMemory` block that the allocation
-	// belongs to. If the allocation is sub-allocated from a larger block, you may need to
-	// consider the offset of the allocation (`Allocation_Info.offset`).
+	// Note the handle is returned for the entire `vk.DeviceMemory` block that the
+	// allocation belongs to. If the allocation is sub-allocated from a larger
+	// block, you may need to consider the offset of the allocation
+	// (`Allocation_Info.offset`).
 	//
-	// If the procedure fails with `vk.ERROR_FEATURE_NOT_PRESENT` error code, please
-	// double-check that `Vulkan_Functions.get_memory_win32_handle_khr` procedure pointer is
-	// set, e.g. either by using `VMA_DYNAMIC_VULKAN_FUNCTIONS` or by manually passing it
-	// through `Allocator_Create_Info.vulkan_functions`.
+	// If the procedure fails with `vk.ERROR_FEATURE_NOT_PRESENT` error code,
+	// please double-check that `Vulkan_Functions.get_memory_win32_handle_khr`
+	// procedure pointer is set, e.g. either by using
+	// `VMA_DYNAMIC_VULKAN_FUNCTIONS` or by manually passing it through
+	// `Allocator_Create_Info.vulkan_functions`.
 	@(link_name = "vmaGetMemoryWin32Handle")
 	get_memory_win32_handle :: proc(
 		allocator: Allocator,
@@ -867,8 +979,8 @@ foreign vma_lib {
 
 	// Given an allocation, returns Property Flags of its memory type.
 	//
-	// This is just a convenience procedure. Same information can be obtained using
-	// `get_allocation_info()` + `get_memory_properties()`.
+	// This is just a convenience procedure. Same information can be obtained
+	// using `get_allocation_info()` + `get_memory_properties()`.
 	@(link_name = "vmaGetAllocationMemoryProperties")
 	get_allocation_memory_properties :: proc(
 		allocator: Allocator,
@@ -877,45 +989,53 @@ foreign vma_lib {
 
 	// Maps memory represented by given allocation and returns pointer to it.
 	//
-	// Maps memory represented by given allocation to make it accessible to CPU code. When
-	// succeeded, `*data` contains a pointer to the first byte of this memory.
+	// Maps memory represented by given allocation to make it accessible to CPU
+	// code. When succeeded, `*data` contains a pointer to the first byte of this
+	// memory.
 	//
-	// Warning: If the allocation is part of a bigger `VkDeviceMemory` block, the returned
-	// pointer is correctly offset to the beginning of the region assigned to this particular
-	// allocation. Unlike the result of `vkMapMemory`, it points to the allocation, not to the
-	// beginning of the whole block. You should not add VmaAllocationInfo::offset to it!
+	// Warning: If the allocation is part of a bigger `VkDeviceMemory` block, the
+	// returned pointer is correctly offset to the beginning of the region
+	// assigned to this particular allocation. Unlike the result of `vkMapMemory`,
+	// it points to the allocation, not to the beginning of the whole block. You
+	// should not add VmaAllocationInfo::offset to it!
 	//
-	// Mapping is internally reference-counted and synchronized, so despite raw Vulkan
-	// procedure `vkMapMemory()` cannot be used to map the same block of `VkDeviceMemory`
-	// multiple times simultaneously, it is safe to call this procedure on allocations assigned
-	// to the same memory block. Actual Vulkan memory will be mapped on the first mapping and
-	// unmapped on the last unmapping.
+	// Mapping is internally reference-counted and synchronized, so despite raw
+	// Vulkan procedure `vkMapMemory()` cannot be used to map the same block of
+	// `VkDeviceMemory` multiple times simultaneously, it is safe to call this
+	// procedure on allocations assigned to the same memory block. Actual Vulkan
+	// memory will be mapped on the first mapping and unmapped on the last
+	// unmapping.
 	//
-	// If the procedure succeeded, you must call `unmap_memory()` to unmap the allocation when
-	// mapping is no longer needed or before freeing the allocation, at the latest.
+	// If the procedure succeeded, you must call `unmap_memory()` to unmap the
+	// allocation when mapping is no longer needed or before freeing the
+	// allocation, at the latest.
 	//
-	// It is also safe to call this procedure multiple times on the same allocation. You must
-	// call `unmap_memory()` the same number of times as you called `map_memory()`.
+	// It is also safe to call this procedure multiple times on the same
+	// allocation. You must call `unmap_memory()` the same number of times as you
+	// called `map_memory()`.
 	//
-	// This procedure fails when used on an allocation made in a memory type that is not
-	// `HOST_VISIBLE`.
+	// This procedure fails when used on an allocation made in a memory type that
+	// is not `HOST_VISIBLE`.
 	//
-	// This procedure doesn't automatically flush or invalidate caches. If the allocation is
-	// made from a memory type that is not `HOST_COHERENT`, you also need to use
-	// `invalidate_allocation()` / `flush_allocation()`, as required by Vulkan specification.
+	// This procedure doesn't automatically flush or invalidate caches. If the
+	// allocation is made from a memory type that is not `HOST_COHERENT`, you also
+	// need to use `invalidate_allocation()` / `flush_allocation()`, as required
+	// by Vulkan specification.
 	@(link_name = "vmaMapMemory")
 	map_memory :: proc(
 		allocator: Allocator,
 		allocation: Allocation,
 		data: ^rawptr) -> vk.Result ---
 
-	// Unmaps memory represented by given allocation, mapped previously using `map_memory()`.
+	// Unmaps memory represented by given allocation, mapped previously using
+	// `map_memory()`.
 	//
 	// For details, see the description of `map_memory()`.
 	//
-	// This procedure doesn't automatically flush or invalidate caches. If the allocation is
-	// made from a memory type that is not `HOST_COHERENT`, you also need to use
-	// `invalidate_allocation()` / `flush_allocation()`, as required by Vulkan specification.
+	// This procedure doesn't automatically flush or invalidate caches. If the
+	// allocation is made from a memory type that is not `HOST_COHERENT`, you also
+	// need to use `invalidate_allocation()` / `flush_allocation()`, as required
+	// by Vulkan specification.
 	@(link_name = "vmaUnmapMemory")
 	unmap_memory :: proc(
 		allocator: Allocator,
@@ -923,25 +1043,27 @@ foreign vma_lib {
 
 	// Flushes memory of given allocation.
 	//
-	// Calls `vk.FlushMappedMemoryRanges()` for memory associated with the given range of the
-	// given allocation. It needs to be called after writing to a mapped memory for memory
-	// types that are not `HOST_COHERENT`. Unmap operation doesn't do that automatically.
+	// Calls `vk.FlushMappedMemoryRanges()` for memory associated with the given
+	// range of the given allocation. It needs to be called after writing to a
+	// mapped memory for memory types that are not `HOST_COHERENT`. Unmap
+	// operation doesn't do that automatically.
 	//
 	// - `offset` must be relative to the beginning of the allocation.
-	// - `size` can be `vk.WHOLE_SIZE`. It means all memory from `offset` to the end of the
-	//   given allocation.
-	// - `offset` and `size` don't have to be aligned. They are internally rounded down/up to a
-	//   multiple of `nonCoherentAtomSize`.
+	// - `size` can be `vk.WHOLE_SIZE`. It means all memory from `offset` to the
+	//   end of the given allocation.
+	// - `offset` and `size` don't have to be aligned. They are internally rounded
+	//   down/up to a multiple of `nonCoherentAtomSize`.
 	// - If `size` is 0, this call is ignored.
-	// - If the memory type that the `allocation` belongs to is not `HOST_VISIBLE` or it is
-	//   `HOST_COHERENT`, this call is ignored.
+	// - If the memory type that the `allocation` belongs to is not `HOST_VISIBLE`
+	//   or it is `HOST_COHERENT`, this call is ignored.
 	//
-	// Warning! `offset` and `size` are relative to the contents of the given `allocation`. If
-	// you mean the whole allocation, you can pass 0 and `vk.WHOLE_SIZE`, respectively. Do not
-	// pass the allocation's offset as `offset`!!!
+	// Warning! `offset` and `size` are relative to the contents of the given
+	// `allocation`. If you mean the whole allocation, you can pass 0 and
+	// `vk.WHOLE_SIZE`, respectively. Do not pass the allocation's offset as
+	// `offset`!!!
 	//
-	// This procedure returns the `vk.Result` from `vk.FlushMappedMemoryRanges` if it is
-	// called, otherwise `vk.SUCCESS`.
+	// This procedure returns the `vk.Result` from `vk.FlushMappedMemoryRanges` if
+	// it is called, otherwise `vk.SUCCESS`.
 	@(link_name = "vmaFlushAllocation")
 	flush_allocation :: proc(
 		allocator: Allocator,
@@ -951,25 +1073,27 @@ foreign vma_lib {
 
 	// Invalidates memory of given allocation.
 	//
-	// Calls `vk.InvalidateMappedMemoryRanges()` for memory associated with the given range of
-	// the given allocation. It needs to be called before reading from a mapped memory for
-	// memory types that are not `HOST_COHERENT`. Map operation doesn't do that automatically.
+	// Calls `vk.InvalidateMappedMemoryRanges()` for memory associated with the
+	// given range of the given allocation. It needs to be called before reading
+	// from a mapped memory for memory types that are not `HOST_COHERENT`. Map
+	// operation doesn't do that automatically.
 	//
 	// - `offset` must be relative to the beginning of the allocation.
-	// - `size` can be `vk.WHOLE_SIZE`. It means all memory from `offset` to the end of the
-	//   given allocation.
-	// - `offset` and `size` don't have to be aligned. They are internally rounded down/up to a
-	//   multiple of `nonCoherentAtomSize`.
+	// - `size` can be `vk.WHOLE_SIZE`. It means all memory from `offset` to the
+	//   end of the given allocation.
+	// - `offset` and `size` don't have to be aligned. They are internally rounded
+	//   down/up to a multiple of `nonCoherentAtomSize`.
 	// - If `size` is 0, this call is ignored.
-	// - If the memory type that the `allocation` belongs to is not `HOST_VISIBLE` or it is
-	//   `HOST_COHERENT`, this call is ignored.
+	// - If the memory type that the `allocation` belongs to is not `HOST_VISIBLE`
+	//   or it is `HOST_COHERENT`, this call is ignored.
 	//
-	// Warning! `offset` and `size` are relative to the contents of the given `allocation`. If
-	// you mean the whole allocation, you can pass 0 and `vk.WHOLE_SIZE`, respectively. Do not
-	// pass the allocation's offset as `offset`!!!
+	// Warning! `offset` and `size` are relative to the contents of the given
+	// `allocation`. If you mean the whole allocation, you can pass 0 and
+	// `vk.WHOLE_SIZE`, respectively. Do not pass the allocation's offset as
+	// `offset`!!!
 	//
-	// This procedure returns the `VkResult` from `vk.InvalidateMappedMemoryRanges` if it is
-	// called, otherwise `vk.SUCCESS`.
+	// This procedure returns the `VkResult` from
+	// `vk.InvalidateMappedMemoryRanges` if it is called, otherwise `vk.SUCCESS`.
 	@(link_name = "vmaInvalidateAllocation")
 	invalidate_allocation :: proc(
 		allocator: Allocator,
@@ -979,19 +1103,21 @@ foreign vma_lib {
 
 	// Flushes memory of given set of allocations.
 	//
-	// Calls `vk.FlushMappedMemoryRanges()` for memory associated with the given ranges of the
-	// given allocations.
+	// Calls `vk.FlushMappedMemoryRanges()` for memory associated with the given
+	// ranges of the given allocations.
 	//
 	// - `allocator`: The allocator object.
 	// - `allocation_count`: The number of allocations to flush.
 	// - `allocations`: An array of allocations to flush.
-	// - `offsets`: If not `nil`, it must point to an array of offsets of regions to flush,
-	//   relative to the beginning of respective allocations. `nil` means all offsets are zero.
-	// - `sizes`: If not `nil`, it must point to an array of sizes of regions to flush in
-	//   respective allocations. `nil` means `vk.WHOLE_SIZE` for all allocations.
+	// - `offsets`: If not `nil`, it must point to an array of offsets of regions
+	//   to flush, relative to the beginning of respective allocations. `nil`
+	//   means all offsets are zero.
+	// - `sizes`: If not `nil`, it must point to an array of sizes of regions to
+	//   flush in respective allocations. `nil` means `vk.WHOLE_SIZE` for all
+	//   allocations.
 	//
-	// This procedure returns the `VkResult` from `vk.FlushMappedMemoryRanges` if it is called,
-	// otherwise `vk.SUCCESS`.
+	// This procedure returns the `VkResult` from `vk.FlushMappedMemoryRanges` if
+	// it is called, otherwise `vk.SUCCESS`.
 	@(link_name = "vmaFlushAllocations")
 	flush_allocations :: proc(
 		allocator: Allocator,
@@ -1002,19 +1128,21 @@ foreign vma_lib {
 
 	// Invalidates memory of given set of allocations.
 	//
-	// Calls `vk.InvalidateMappedMemoryRanges()` for memory associated with the given ranges of
-	// the given allocations.
+	// Calls `vk.InvalidateMappedMemoryRanges()` for memory associated with the
+	// given ranges of the given allocations.
 	//
 	// - `allocator`: The allocator object.
 	// - `allocation_count`: The number of allocations to invalidate.
 	// - `allocations`: An array of allocations to invalidate.
-	// - `offsets`: If not `nil`, it must point to an array of offsets of regions to invalidate,
-	//   relative to the beginning of respective allocations. `nil` means all offsets are zero.
-	// - `sizes`: If not `nil`, it must point to an array of sizes of regions to invalidate in
-	//   respective allocations. `nil` means `vk.WHOLE_SIZE` for all allocations.
+	// - `offsets`: If not `nil`, it must point to an array of offsets of regions
+	//   to invalidate, relative to the beginning of respective allocations. `nil`
+	//   means all offsets are zero.
+	// - `sizes`: If not `nil`, it must point to an array of sizes of regions to
+	//   invalidate in respective allocations. `nil` means `vk.WHOLE_SIZE` for all
+	//   allocations.
 	//
-	// This procedure returns the `VkResult` from `vk.InvalidateMappedMemoryRanges` if it is
-	// called, otherwise `vk.SUCCESS`.
+	// This procedure returns the `VkResult` from
+	// `vk.InvalidateMappedMemoryRanges` if it is called, otherwise `vk.SUCCESS`.
 	@(link_name = "vmaInvalidateAllocations")
 	invalidate_allocations :: proc(
 		allocator: Allocator,
@@ -1023,28 +1151,32 @@ foreign vma_lib {
 		offsets: [^]vk.DeviceSize,
 		sizes: [^]vk.DeviceSize) -> vk.Result ---
 
-	// Maps the allocation temporarily if needed, copies data from the specified host pointer
-	// to it, and flushes the memory from the host caches if needed.
+	// Maps the allocation temporarily if needed, copies data from the specified
+	// host pointer to it, and flushes the memory from the host caches if needed.
 	//
 	// - `allocator`: The allocator object.
 	// - `src_data`: Pointer to the host data that becomes the source of the copy.
-	// - `dst_allocation`: Handle to the allocation that becomes the destination of the copy.
-	// - `dst_offset`: Offset within `dst_allocation` where to write the copied data, in bytes.
+	// - `dst_allocation`: Handle to the allocation that becomes the destination
+	//   of the copy.
+	// - `dst_offset`: Offset within `dst_allocation` where to write the copied
+	//   data, in bytes.
 	// - `size`: Number of bytes to copy.
 	//
-	// This is a convenience procedure that allows copying data from a host pointer to an
-	// allocation easily. The same behavior can be achieved by calling `map_memory()`,
-	// `memcpy()`, `unmap_memory()`, and `flush_allocation()`.
+	// This is a convenience procedure that allows copying data from a host
+	// pointer to an allocation easily. The same behavior can be achieved by
+	// calling `map_memory()`, `memcpy()`, `unmap_memory()`, and
+	// `flush_allocation()`.
 	//
-	// This procedure can be called only for allocations created in a memory type that has
-	// `VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT` flag. It can be ensured, e.g., by using
-	// `VMA_MEMORY_USAGE_AUTO` and `VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT` or
-	// `VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT`. Otherwise, the procedure will fail and
-	// generate a Validation Layers error.
+	// This procedure can be called only for allocations created in a memory type
+	// that has `VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT` flag. It can be ensured,
+	// e.g., by using `VMA_MEMORY_USAGE_AUTO` and
+	// `VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT` or
+	// `VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT`. Otherwise, the procedure
+	// will fail and generate a Validation Layers error.
 	//
-	// `dst_offset` is relative to the contents of the given `dst_allocation`. If you mean the
-	// whole allocation, you should pass 0. Do not pass the allocation's offset within the
-	// device memory block as this parameter!
+	// `dst_offset` is relative to the contents of the given `dst_allocation`. If
+	// you mean the whole allocation, you should pass 0. Do not pass the
+	// allocation's offset within the device memory block as this parameter!
 	@(link_name = "vmaCopyMemoryToAllocation")
 	copy_memory_to_allocation :: proc(
 		allocator: Allocator,
@@ -1053,30 +1185,34 @@ foreign vma_lib {
 		dst_offset: vk.DeviceSize,
 		size: vk.DeviceSize) -> vk.Result ---
 
-	// Invalidates memory in the host caches if needed, maps the allocation temporarily if
-	// needed, and copies data from it to a specified host pointer.
+	// Invalidates memory in the host caches if needed, maps the allocation
+	// temporarily if needed, and copies data from it to a specified host pointer.
 	//
 	// - `allocator`: The allocator object.
-	// - `src_allocation`: Handle to the allocation that becomes the source of the copy.
-	// - `src_offset`: Offset within `src_allocation` where to read the copied data, in bytes.
-	// - `dst_host_pointer`: Pointer to the host memory that becomes the destination of the
+	// - `src_allocation`: Handle to the allocation that becomes the source of the
 	//   copy.
+	// - `src_offset`: Offset within `src_allocation` where to read the copied
+	//   data, in bytes.
+	// - `dst_host_pointer`: Pointer to the host memory that becomes the
+	//   destination of the copy.
 	// - `size`: Number of bytes to copy.
 	//
-	// This is a convenience procedure that allows copying data from an allocation to a host
-	// pointer easily. The same behavior can be achieved by calling vmaInvalidateAllocation(),
-	// vmaMapMemory(), `memcpy()`, and vmaUnmapMemory().
+	// This is a convenience procedure that allows copying data from an allocation
+	// to a host pointer easily. The same behavior can be achieved by calling
+	// vmaInvalidateAllocation(), vmaMapMemory(), `memcpy()`, and
+	// vmaUnmapMemory().
 	//
-	// This procedure should be called only for allocations created in a memory type that has
-	// `VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT` and `VK_MEMORY_PROPERTY_HOST_CACHED_BIT` flag. It
-	// can be ensured, e.g., by using `VMA_MEMORY_USAGE_AUTO` and
-	// `VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT`. Otherwise, the procedure may fail and
-	// generate a Validation Layers error. It may also work very slowly when reading from an
-	// uncached memory.
+	// This procedure should be called only for allocations created in a memory
+	// type that has `VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT` and
+	// `VK_MEMORY_PROPERTY_HOST_CACHED_BIT` flag. It can be ensured, e.g., by
+	// using `VMA_MEMORY_USAGE_AUTO` and
+	// `VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT`. Otherwise, the procedure
+	// may fail and generate a Validation Layers error. It may also work very
+	// slowly when reading from an uncached memory.
 	//
-	// `src_offset` is relative to the contents of the given `src_allocation`. If you mean the
-	// whole allocation, you should pass 0. Do not pass the allocation's offset within the
-	// device memory block as this parameter!
+	// `src_offset` is relative to the contents of the given `src_allocation`. If
+	// you mean the whole allocation, you should pass 0. Do not pass the
+	// allocation's offset within the device memory block as this parameter!
 	@(link_name = "vmaCopyAllocationToMemory")
 	copy_allocation_to_memory :: proc(
 		allocator: Allocator,
@@ -1085,24 +1221,25 @@ foreign vma_lib {
 		dst_host_pointer: rawptr,
 		size: vk.DeviceSize) -> vk.Result ---
 
-	// Checks magic number in margins around all allocations in given memory types (in both
-	// default and custom pools) in search for corruptions.
+	// Checks magic number in margins around all allocations in given memory types
+	// (in both default and custom pools) in search for corruptions.
 	//
 	// - `allocator`: The allocator object.
-	// - `memory_type_bits`: Bit mask, where each bit set means that a memory type with that
-	//   index should be checked.
+	// - `memory_type_bits`: Bit mask, where each bit set means that a memory type
+	//   with that index should be checked.
 	//
-	// Corruption detection is enabled only when `VMA_DEBUG_DETECT_CORRUPTION` macro is defined
-	// to nonzero, `VMA_DEBUG_MARGIN` is defined to nonzero, and only for memory types that are
-	// `HOST_VISIBLE` and `HOST_COHERENT`.
+	// Corruption detection is enabled only when `VMA_DEBUG_DETECT_CORRUPTION`
+	// macro is defined to nonzero, `VMA_DEBUG_MARGIN` is defined to nonzero, and
+	// only for memory types that are `HOST_VISIBLE` and `HOST_COHERENT`.
 	//
 	// Possible return values:
 	//
-	// - `vk.ERROR_FEATURE_NOT_PRESENT`: Corruption detection is not enabled for any of the
-	//   specified memory types.
+	// - `vk.ERROR_FEATURE_NOT_PRESENT`: Corruption detection is not enabled for
+	//   any of the specified memory types.
 	// - `vk.SUCCESS`: Corruption detection has been performed and succeeded.
-	// - `VK_ERROR_UNKNOWN`: Corruption detection has been performed and found memory
-	//   corruptions around one of the allocations. `VMA_ASSERT` is also fired in that case.
+	// - `VK_ERROR_UNKNOWN`: Corruption detection has been performed and found
+	//   memory corruptions around one of the allocations. `VMA_ASSERT` is also
+	//   fired in that case.
 	// - Other value: Error returned by Vulkan, e.g., memory mapping failure.
 	@(link_name = "vmaCheckCorruption")
 	check_corruption :: proc(
@@ -1112,9 +1249,10 @@ foreign vma_lib {
 	// Begins defragmentation process.
 	//
 	// - `allocator`: The allocator object.
-	// - `defragmentation_info`: Structure filled with parameters of defragmentation.
-	// - `ctx`: Context object that must be passed to `end_defragmentation()` to finish
+	// - `defragmentation_info`: Structure filled with parameters of
 	//   defragmentation.
+	// - `ctx`: Context object that must be passed to `end_defragmentation()` to
+	//   finish defragmentation.
 	//
 	// Returns:
 	// - `vk.SUCCESS` if defragmentation can begin.
@@ -1131,7 +1269,8 @@ foreign vma_lib {
 	// - `ctx`: Context object that has been created by vmaBeginDefragmentation().
 	// - `stats`: Optional stats for the defragmentation. Can be `nil`.
 	//
-	// Use this procedure to finish defragmentation started by vmaBeginDefragmentation().
+	// Use this procedure to finish defragmentation started by
+	// vmaBeginDefragmentation().
 	@(link_name = "vmaEndDefragmentation")
 	end_defragmentation :: proc(
 		allocator: Allocator,
@@ -1147,9 +1286,9 @@ foreign vma_lib {
 	// Returns:
 	// - `vk.SUCCESS` if no more moves are possible. Then you can omit the call to
 	//   `end_defragmentation_pass()` and simply end the whole defragmentation.
-	// - `vk.INCOMPLETE` if there are pending moves returned in `pass_info`. You need to
-	//   perform them, call `end_defragmentation_pass()`, and then preferably try another pass
-	//   with `begin_defragmentation_pass()`.
+	// - `vk.INCOMPLETE` if there are pending moves returned in `pass_info`. You
+	//   need to perform them, call `end_defragmentation_pass()`, and then
+	//   preferably try another pass with `begin_defragmentation_pass()`.
 	@(link_name = "vmaBeginDefragmentationPass")
 	begin_defragmentation_pass :: proc(
 		allocator: Allocator,
@@ -1163,17 +1302,18 @@ foreign vma_lib {
 	// - `pass_info` Computed information for current pass filled by
 	//   `begin_defragmentation_pass()` and possibly modified by you.
 	//
-	// Returns `vk.SUCCESS` if no more moves are possible or `VK_INCOMPLETE` if more
-	// defragmentations are possible.
+	// Returns `vk.SUCCESS` if no more moves are possible or `VK_INCOMPLETE` if
+	// more defragmentations are possible.
 	//
-	// Ends incremental defragmentation pass and commits all defragmentation moves from
-	// `pPassInfo`. After this call:
+	// Ends incremental defragmentation pass and commits all defragmentation moves
+	// from `pPassInfo`. After this call:
 	//
-	// - Allocations at `pPassInfo[i].srcAllocation` that had `pPassInfo[i].operation ==`
-	//   #VMA_DEFRAGMENTATION_MOVE_OPERATION_COPY (which is the default) will be pointing to
-	//   the new destination place.
-	// - Allocation at `pPassInfo[i].srcAllocation` that had `pPassInfo[i].operation ==`
-	//   #VMA_DEFRAGMENTATION_MOVE_OPERATION_DESTROY will be freed.
+	// - Allocations at `pPassInfo[i].srcAllocation` that had
+	//   `pPassInfo[i].operation ==` #VMA_DEFRAGMENTATION_MOVE_OPERATION_COPY
+	//   (which is the default) will be pointing to the new destination place.
+	// - Allocation at `pPassInfo[i].srcAllocation` that had
+	//   `pPassInfo[i].operation ==` #VMA_DEFRAGMENTATION_MOVE_OPERATION_DESTROY
+	//   will be freed.
 	//
 	// If no more moves are possible you can end whole defragmentation.
 	@(link_name = "vmaEndDefragmentationPass")
@@ -1184,12 +1324,13 @@ foreign vma_lib {
 
 	// Binds buffer to allocation.
 	//
-	// Binds specified buffer to region of memory represented by specified allocation. Gets
-	// `VkDeviceMemory` handle and offset from the allocation. If you want to create a buffer,
-	// allocate memory for it and bind them together separately, you should use this procedure
-	// for binding instead of standard `vkBindBufferMemory()`, because it ensures proper
-	// synchronization so that when a `VkDeviceMemory` object is used by multiple allocations,
-	// calls to `vkBind*Memory()` or `vkMapMemory()` won't happen from multiple threads
+	// Binds specified buffer to region of memory represented by specified
+	// allocation. Gets `VkDeviceMemory` handle and offset from the allocation. If
+	// you want to create a buffer, allocate memory for it and bind them together
+	// separately, you should use this procedure for binding instead of standard
+	// `vkBindBufferMemory()`, because it ensures proper synchronization so that
+	// when a `VkDeviceMemory` object is used by multiple allocations, calls to
+	// `vkBind*Memory()` or `vkMapMemory()` won't happen from multiple threads
 	// simultaneously (which is illegal in Vulkan).
 	//
 	// It is recommended to use procedure `create_buffer()` instead of this one.
@@ -1203,19 +1344,20 @@ foreign vma_lib {
 	//
 	// - `allocator` Allocator object.
 	// - `allocation` Allocation object.
-	// - `allocation_local_offset` Additional offset to be added while binding, relative to the
-	//   beginning of the `allocation`. Normally it should be 0.
+	// - `allocation_local_offset` Additional offset to be added while binding,
+	//   relative to the beginning of the `allocation`. Normally it should be 0.
 	// - `buffer` Buffer to bind.
-	// - `next` A chain of structures to be attached to `VkBindBufferMemoryInfoKHR` structure
-	//   used internally. Normally it should be `nil`.
+	// - `next` A chain of structures to be attached to
+	//   `VkBindBufferMemoryInfoKHR` structure used internally. Normally it should
+	//   be `nil`.
 	//
-	// This procedure is similar to `bind_buffer_memory()`, but it provides additional
-	// parameters.
+	// This procedure is similar to `bind_buffer_memory()`, but it provides
+	// additional parameters.
 	//
 	// If `next` is not `nil`, `Allocator` object must have been created with
 	// `VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT` flag or with
-	// `VmaAllocatorCreateInfo::vulkanApiVersion` `>= VK_API_VERSION_1_1`. Otherwise the call
-	// fails.
+	// `VmaAllocatorCreateInfo::vulkanApiVersion` `>= VK_API_VERSION_1_1`.
+	// Otherwise the call fails.
 	@(link_name = "vmaBindBufferMemory2")
 	bind_buffer_memory2 :: proc(
 		allocator: Allocator,
@@ -1226,12 +1368,13 @@ foreign vma_lib {
 
 	// Binds image to allocation.
 	//
-	// Binds specified image to region of memory represented by specified allocation. Gets
-	// `VkDeviceMemory` handle and offset from the allocation. If you want to create an image,
-	// allocate memory for it and bind them together separately, you should use this procedure
-	// for binding instead of standard `vkBindImageMemory()`, because it ensures proper
-	// synchronization so that when a `VkDeviceMemory` object is used by multiple allocations,
-	// calls to `vkBind*Memory()` or `vkMapMemory()` won't happen from multiple threads
+	// Binds specified image to region of memory represented by specified
+	// allocation. Gets `VkDeviceMemory` handle and offset from the allocation. If
+	// you want to create an image, allocate memory for it and bind them together
+	// separately, you should use this procedure for binding instead of standard
+	// `vkBindImageMemory()`, because it ensures proper synchronization so that
+	// when a `VkDeviceMemory` object is used by multiple allocations, calls to
+	// `vkBind*Memory()` or `vkMapMemory()` won't happen from multiple threads
 	// simultaneously (which is illegal in Vulkan).
 	//
 	// It is recommended to use procedure `create_image()` instead of this one.
@@ -1245,19 +1388,19 @@ foreign vma_lib {
 	//
 	// - `allocator` Allocator object.
 	// - `allocation` Allocation object.
-	// - `allocation_local_offset` Additional offset to be added while binding, relative to the
-	//   beginning of the `allocation`. Normally it should be 0.
+	// - `allocation_local_offset` Additional offset to be added while binding,
+	//   relative to the beginning of the `allocation`. Normally it should be 0.
 	// - `image` Image to bind.
-	// - `next` A chain of structures to be attached to `VkBindImageMemoryInfoKHR` structure
-	//   used internally. Normally it should be `nil`.
+	// - `next` A chain of structures to be attached to `VkBindImageMemoryInfoKHR`
+	//   structure used internally. Normally it should be `nil`.
 	//
-	// This procedure is similar to `bind_image_memory()`, but it provides additional
-	// parameters.
+	// This procedure is similar to `bind_image_memory()`, but it provides
+	// additional parameters.
 	//
 	// If `next` is not `nil`, `Allocator` object must have been created with
 	// `VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT` flag or with
-	// `VmaAllocatorCreateInfo::vulkanApiVersion` `>= VK_API_VERSION_1_1`. Otherwise the call
-	// fails.
+	// `VmaAllocatorCreateInfo::vulkanApiVersion` `>= VK_API_VERSION_1_1`.
+	// Otherwise the call fails.
 	@(link_name = "vmaBindImageMemory2")
 	bind_image_memory2 :: proc(
 		allocator: Allocator,
@@ -1273,26 +1416,28 @@ foreign vma_lib {
 	// - `allocation_create_info` Parameters for memory allocation.
 	// - `buffer` Output parameter for the created buffer.
 	// - `allocation` Output parameter for the created allocation.
-	// - `allocation_info` Optional. Information about allocated memory. It can be later
-	//   fetched using procedure `get_allocation_info()`.
+	// - `allocation_info` Optional. Information about allocated memory. It can be
+	//   later fetched using procedure `get_allocation_info()`.
 	//
 	// This procedure automatically:
 	// - Creates buffer.
 	// - Allocates appropriate memory for it.
 	// - Binds the buffer with the memory.
 	//
-	// If any of these operations fail, buffer and allocation are not created, returned value
-	// is negative error code, `buffer` and `allocation` are `nil`.
+	// If any of these operations fail, buffer and allocation are not created,
+	// returned value is negative error code, `buffer` and `allocation` are `nil`.
 	//
-	// If the procedure succeeded, you must destroy both buffer and allocation when you no
-	// longer need them using either convenience procedure `destroy_buffer()` or separately,
-	// using `vkDestroyBuffer()` and `free_memory()`.
+	// If the procedure succeeded, you must destroy both buffer and allocation
+	// when you no longer need them using either convenience procedure
+	// `destroy_buffer()` or separately, using `vkDestroyBuffer()` and
+	// `free_memory()`.
 	//
 	// If `VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT` flag was used,
-	// `VK_KHR_dedicated_allocation` extension is used internally to query driver whether it
-	// requires or prefers the new buffer to have dedicated allocation. If yes, and if
-	// dedicated allocation is possible (`VMA_ALLOCATION_CREATE_NEVER_ALLOCATE_BIT` is not
-	// used), it creates dedicated allocation for this buffer, just like when using
+	// `VK_KHR_dedicated_allocation` extension is used internally to query driver
+	// whether it requires or prefers the new buffer to have dedicated allocation.
+	// If yes, and if dedicated allocation is possible
+	// (`VMA_ALLOCATION_CREATE_NEVER_ALLOCATE_BIT` is not used), it creates
+	// dedicated allocation for this buffer, just like when using
 	// `VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT`.
 	@(link_name = "vmaCreateBuffer")
 	create_buffer :: proc(
@@ -1305,9 +1450,10 @@ foreign vma_lib {
 
 	// Creates a buffer with additional minimum alignment.
 	//
-	// Similar to `create_buffer()` but provides additional parameter `min_alignment` which
-	// allows to specify custom, minimum alignment to be used when placing the buffer inside a
-	// larger memory block, which may be needed e.g. for interop with OpenGL.
+	// Similar to `create_buffer()` but provides additional parameter
+	// `min_alignment` which allows to specify custom, minimum alignment to be
+	// used when placing the buffer inside a larger memory block, which may be
+	// needed e.g. for interop with OpenGL.
 	@(link_name = "vmaCreateBufferWithAlignment")
 	create_buffer_with_alignment :: proc(
 		allocator: Allocator,
@@ -1321,7 +1467,8 @@ foreign vma_lib {
 	// Creates a new `VkBuffer`, binds already created memory for it.
 	//
 	// - `allocator` Allocator object.
-	// - `allocation` Allocation that provides memory to be used for binding new buffer to it.
+	// - `allocation` Allocation that provides memory to be used for binding new
+	//   buffer to it.
 	// - `buffer_create_info` Parameters for buffer creation.
 	// - `buffer` Output parameter for the created buffer.
 	//
@@ -1329,12 +1476,13 @@ foreign vma_lib {
 	// - Creates buffer.
 	// - Binds the buffer with the supplied memory.
 	//
-	// If any of these operations fail, buffer is not created, returned value is negative error
-	// code and `buffer` is `nil`.
+	// If any of these operations fail, buffer is not created, returned value is
+	// negative error code and `buffer` is `nil`.
 	//
-	// If the procedure succeeded, you must destroy the buffer when you no longer need it using
-	// `vkDestroyBuffer()`. If you want to also destroy the corresponding allocation you can
-	// use convenience procedure `destroy_buffer()`.
+	// If the procedure succeeded, you must destroy the buffer when you no longer
+	// need it using `vkDestroyBuffer()`. If you want to also destroy the
+	// corresponding allocation you can use convenience procedure
+	// `destroy_buffer()`.
 	@(link_name = "vmaCreateAliasingBuffer")
 	create_aliasing_buffer :: proc(
 		allocator: Allocator,
@@ -1345,9 +1493,10 @@ foreign vma_lib {
 	// Creates a new `VkBuffer`, binds already created memory for it.
 	//
 	// - `allocator` Allocator object.
-	// - `allocation` Allocation that provides memory to be used for binding new buffer to it.
-	// - `allocation_local_offset` Additional offset to be added while binding, relative to the
-	//   beginning of the allocation. Normally it should be 0.
+	// - `allocation` Allocation that provides memory to be used for binding new
+	//   buffer to it.
+	// - `allocation_local_offset` Additional offset to be added while binding,
+	//   relative to the beginning of the allocation. Normally it should be 0.
 	// - `buffer_create_info` Parameters for buffer creation.
 	// - `buffer` Output parameter for the created buffer.
 	//
@@ -1355,12 +1504,13 @@ foreign vma_lib {
 	// - Creates buffer.
 	// - Binds the buffer with the supplied memory.
 	//
-	// If any of these operations fail, buffer is not created, returned value is negative error
-	// code and `buffer` is `nil`.
+	// If any of these operations fail, buffer is not created, returned value is
+	// negative error code and `buffer` is `nil`.
 	//
-	// If the procedure succeeded, you must destroy the buffer when you no longer need it using
-	// `vkDestroyBuffer()`. If you want to also destroy the corresponding allocation you can
-	// use convenience procedure `destroy_buffer()`.
+	// If the procedure succeeded, you must destroy the buffer when you no longer
+	// need it using `vkDestroyBuffer()`. If you want to also destroy the
+	// corresponding allocation you can use convenience procedure
+	// `destroy_buffer()`.
 	@(link_name = "vmaCreateAliasingBuffer2")
 	create_aliasing_buffer2 :: proc(
 		allocator: Allocator,
@@ -1391,20 +1541,21 @@ foreign vma_lib {
 	// - `allocation_create_info` Parameters for memory allocation.
 	// - `image` Output parameter for the created image.
 	// - `allocation` Output parameter for the created allocation.
-	// - `allocation_info` Optional. Information about allocated memory. It can be later
-	//   fetched using procedure `get_allocation_info()`.
+	// - `allocation_info` Optional. Information about allocated memory. It can be
+	//   later fetched using procedure `get_allocation_info()`.
 	//
 	// This procedure automatically:
 	// - Creates image.
 	// - Allocates appropriate memory for it.
 	// - Binds the image with the memory.
 	//
-	// If any of these operations fail, image and allocation are not created, returned value is
-	// negative error code, `image` and `allocation` are `nil`.
+	// If any of these operations fail, image and allocation are not created,
+	// returned value is negative error code, `image` and `allocation` are `nil`.
 	//
-	// If the procedure succeeded, you must destroy both image and allocation when you no longer
-	// need them using either convenience procedure `destroy_image()` or separately, using
-	// `vk.DestroyImage()` and `free_memory()`.
+	// If the procedure succeeded, you must destroy both image and allocation when
+	// you no longer need them using either convenience procedure
+	// `destroy_image()` or separately, using `vk.DestroyImage()` and
+	// `free_memory()`.
 	@(link_name = "vmaCreateImage")
 	create_image :: proc(
 		allocator: Allocator,
@@ -1417,7 +1568,8 @@ foreign vma_lib {
 	// Creates a new `vk.Image`, binds already created memory for it.
 	//
 	// - `allocator` Allocator object.
-	// - `allocation` Allocation that provides memory to be used for binding new image to it.
+	// - `allocation` Allocation that provides memory to be used for binding new
+	//   image to it.
 	// - `image_create_info` Parameters for image creation.
 	// - `image` Output parameter for the created image.
 	//
@@ -1425,12 +1577,13 @@ foreign vma_lib {
 	// - Creates image.
 	// - Binds the image with the supplied memory.
 	//
-	// If any of these operations fail, image is not created, returned value is negative error
-	// code and `image` is `nil`.
+	// If any of these operations fail, image is not created, returned value is
+	// negative error code and `image` is `nil`.
 	//
-	// If the procedure succeeded, you must destroy the image when you no longer need it using
-	// `vk.DestroyImage()`. If you want to also destroy the corresponding allocation you can
-	// use convenience procedure `destroy_image()`.
+	// If the procedure succeeded, you must destroy the image when you no longer
+	// need it using `vk.DestroyImage()`. If you want to also destroy the
+	// corresponding allocation you can use convenience procedure
+	// `destroy_image()`.
 	@(link_name = "vmaCreateAliasingImage")
 	create_aliasing_image :: proc(
 		allocator: Allocator,
@@ -1441,9 +1594,10 @@ foreign vma_lib {
 	// Creates a new `vk.Image`, binds already created memory for it.
 	//
 	// - `allocator` Allocator object.
-	// - `allocation` Allocation that provides memory to be used for binding new image to it.
-	// - `allocation_local_offset` Additional offset to be added while binding, relative to the
-	//   beginning of the allocation. Normally it should be 0.
+	// - `allocation` Allocation that provides memory to be used for binding new
+	//   image to it.
+	// - `allocation_local_offset` Additional offset to be added while binding,
+	//   relative to the beginning of the allocation. Normally it should be 0.
 	// - `image_create_info` Parameters for image creation.
 	// - `image` Output parameter for the created image.
 	//
@@ -1451,12 +1605,13 @@ foreign vma_lib {
 	// - Creates image.
 	// - Binds the image with the supplied memory.
 	//
-	// If any of these operations fail, image is not created, returned value is negative error
-	// code and `image` is `nil`.
+	// If any of these operations fail, image is not created, returned value is
+	// negative error code and `image` is `nil`.
 	//
-	// If the procedure succeeded, you must destroy the image when you no longer need it using
-	// `vk.DestroyImage()`. If you want to also destroy the corresponding allocation you can use
-	// convenience procedure `destroy_image()`.
+	// If the procedure succeeded, you must destroy the image when you no longer
+	// need it using `vk.DestroyImage()`. If you want to also destroy the
+	// corresponding allocation you can use convenience procedure
+	// `destroy_image()`.
 	@(link_name = "vmaCreateAliasingImage2")
 	create_aliasing_image2 :: proc(
 		allocator: Allocator,
@@ -1493,25 +1648,25 @@ foreign vma_lib {
 
 	// Destroys virtual block.
 	//
-	// Please note that you should consciously handle virtual allocations that could remain
-	// unfreed in the block. You should either free them individually using `virtual_free()` or
-	// call `clear_virtual_block()` if you are sure this is what you want. If you do neither,
-	// an assert is called.
+	// Please note that you should consciously handle virtual allocations that
+	// could remain unfreed in the block. You should either free them individually
+	// using `virtual_free()` or call `clear_virtual_block()` if you are sure this
+	// is what you want. If you do neither, an assert is called.
 	//
-	// If you keep pointers to some additional metadata associated with your virtual
-	// allocations in their `user_data`, don't forget to free them.
+	// If you keep pointers to some additional metadata associated with your
+	// virtual allocations in their `user_data`, don't forget to free them.
 	@(link_name = "vmaDestroyVirtualBlock")
 	destroy_virtual_block :: proc(
 		virtual_block: Virtual_Block) ---
 
-	// Returns true if the virtual block is empty - contains 0 virtual allocations and has all
-	// its space available for new allocations.
+	// Returns true if the virtual block is empty - contains 0 virtual allocations
+	// and has all its space available for new allocations.
 	@(link_name = "vmaIsVirtualBlockEmpty")
 	is_virtual_block_empty :: proc(
 		virtual_block: Virtual_Block) -> b32 ---
 
-	// Returns information about a specific virtual allocation within a virtual block, like its
-	// size and `user_data` pointer.
+	// Returns information about a specific virtual allocation within a virtual
+	// block, like its size and `user_data` pointer.
 	@(link_name = "vmaGetVirtualAllocationInfo")
 	get_virtual_allocation_info :: proc(
 		virtual_block: Virtual_Block,
@@ -1523,7 +1678,8 @@ foreign vma_lib {
 	// - `virtual_block` Virtual block.
 	// - `create_info` Parameters for the allocation.
 	// - `allocation` Output parameter for the new allocation.
-	// - `offset` Output parameter for the offset of the new allocation. Optional, can be `nil`.
+	// - `offset` Output parameter for the offset of the new allocation. Optional,
+	//   can be `nil`.
 	//
 	// Returns `vk.SUCCESS` if allocation was successful, otherwise an error code.
 	@(link_name = "vmaVirtualAllocate")
@@ -1535,8 +1691,8 @@ foreign vma_lib {
 
 	// Frees virtual allocation inside given virtual block.
 	//
-	// It is correct to call this procedure with `allocation == VK_NULL_HANDLE` - it does
-	// nothing.
+	// It is correct to call this procedure with `allocation == VK_NULL_HANDLE` -
+	// it does nothing.
 	@(link_name = "vmaVirtualFree")
 	virtual_free :: proc(
 		virtual_block: Virtual_Block,
@@ -1544,11 +1700,12 @@ foreign vma_lib {
 
 	// Frees all virtual allocations inside given virtual block.
 	//
-	// You must either call this procedure or free each virtual allocation individually with
-	// `virtual_free()` before destroying a virtual block. Otherwise, an assert is called.
+	// You must either call this procedure or free each virtual allocation
+	// individually with `virtual_free()` before destroying a virtual block.
+	// Otherwise, an assert is called.
 	//
-	// If you keep pointer to some additional metadata associated with your virtual allocation
-	// in its `user_data`, don't forget to free it as well.
+	// If you keep pointer to some additional metadata associated with your
+	// virtual allocation in its `user_data`, don't forget to free it as well.
 	@(link_name = "vmaClearVirtualBlock")
 	clear_virtual_block :: proc(
 		virtual_block: Virtual_Block) ---
@@ -1560,8 +1717,8 @@ foreign vma_lib {
 		allocation: Virtual_Allocation,
 		user_data: rawptr) ---
 
-	// Calculates and returns statistics about virtual allocations and memory usage in given
-	// virtual block.
+	// Calculates and returns statistics about virtual allocations and memory
+	// usage in given virtual block.
 	//
 	// This procedure is fast to call. For more detailed statistics, see
 	// `calculate_virtual_block_statistics()`.
@@ -1570,23 +1727,23 @@ foreign vma_lib {
 		virtual_block: Virtual_Block,
 		stats: ^Statistics) ---
 
-	// Calculates and returns detailed statistics about virtual allocations and memory usage in
-	// given virtual block.
+	// Calculates and returns detailed statistics about virtual allocations and
+	// memory usage in given virtual block.
 	//
-	// This procedure is slow to call. Use for debugging purposes. For less detailed statistics,
-	// see `get_virtual_block_statistics()`.
+	// This procedure is slow to call. Use for debugging purposes. For less
+	// detailed statistics, see `get_virtual_block_statistics()`.
 	@(link_name = "vmaCalculateVirtualBlockStatistics")
 	calculate_virtual_block_statistics :: proc(
 		virtual_block: Virtual_Block,
 		stats: ^Detailed_Statistics) ---
 
-	// Builds and returns a `nil`-terminated string in JSON format with information about given
-	// `Virtual_Block`.
+	// Builds and returns a `nil`-terminated string in JSON format with
+	// information about given `Virtual_Block`.
 	// - `virtual_block` Virtual block.
 	// - [out] `stats_string` Returned string.
 	// - `detailed_map` Pass `false` to only obtain statistics as returned by
-	//   `calculate_virtual_block_statistics()`. Pass `true` to also obtain full list of
-	//   allocations and free spaces.
+	//   `calculate_virtual_block_statistics()`. Pass `true` to also obtain full
+	//   list of allocations and free spaces.
 	//
 	// Returned string must be freed using `free_virtual_block_stats_string()`.
 	@(link_name = "vmaBuildVirtualBlockStatsString")
