@@ -1,31 +1,53 @@
 #!/bin/bash
 
+get_vulkan_minor_version() {
+    local full_version=""
+    local minor_version=""
+
+    # Try vulkaninfo first
+    if command -v vulkaninfo >/dev/null 2>&1; then
+        full_version=$(vulkaninfo 2>/dev/null | grep "Vulkan Instance Version:" | awk '{print $4}')
+        if [ -n "$full_version" ]; then
+            # Extract minor version from format like 1.3.xxx
+            minor_version=$(echo "$full_version" | cut -d'.' -f2)
+            echo "$minor_version"
+            return 0
+        fi
+    fi
+
+    # Check VULKAN_SDK path
+    if [ -n "${VULKAN_SDK}" ] && [ -d "${VULKAN_SDK}" ]; then
+        if [ -f "${VULKAN_SDK}/version.txt" ]; then
+            full_version=$(cat "${VULKAN_SDK}/version.txt")
+            minor_version=$(echo "$full_version" | cut -d'.' -f2)
+            echo "$minor_version"
+            return 0
+        fi
+    fi
+
+    echo "0"
+    return 1
+}
+
+VULKAN_MINOR_VERSION=3
+
 # Check if the Vulkan minor version is provided as the first argument
 if [ -n "$1" ]; then
-    VULKAN_VERSION_MINOR=$1
-    echo "Using provided Vulkan minor version: $VULKAN_VERSION_MINOR"
+    VULKAN_MINOR_VERSION=$1
+    echo "Using provided Vulkan minor version: $VULKAN_MINOR_VERSION"
 else
-    # Attempt to detect the installed Vulkan version from the environment
-    if [ -n "$VULKAN_SDK" ]; then
-        # Extract the version from the VULKAN_SDK path (e.g., "/VulkanSDK/1.4.304.0")
-        SDK_FOLDER=$(basename "$VULKAN_SDK")
-        IFS='.' read -r -a VERSION_PARTS <<< "$SDK_FOLDER"
-        VULKAN_VERSION_MINOR=${VERSION_PARTS[1]}
-    else
-        echo "No Vulkan version provided and VULKAN_SDK not found, defaulting to 1000000"
-        VMA_VULKAN_VERSION=1000000
-    fi
+	VULKAN_MINOR_VERSION=$(get_vulkan_minor_version)
 fi
 
 # Construct the VMA_VULKAN_VERSION
-if [ -n "$VULKAN_VERSION_MINOR" ]; then
-    if [ "$VULKAN_VERSION_MINOR" -ge 4 ]; then
+if [ -n "$VULKAN_MINOR_VERSION" ]; then
+    if [ "$VULKAN_MINOR_VERSION" -ge 4 ]; then
         VMA_VULKAN_VERSION=1004000
-    elif [ "$VULKAN_VERSION_MINOR" -ge 3 ]; then
+    elif [ "$VULKAN_MINOR_VERSION" -ge 3 ]; then
         VMA_VULKAN_VERSION=1003000
-    elif [ "$VULKAN_VERSION_MINOR" -ge 2 ]; then
+    elif [ "$VULKAN_MINOR_VERSION" -ge 2 ]; then
         VMA_VULKAN_VERSION=1002000
-    elif [ "$VULKAN_VERSION_MINOR" -ge 1 ]; then
+    elif [ "$VULKAN_MINOR_VERSION" -ge 1 ]; then
         VMA_VULKAN_VERSION=1001000
     else
         VMA_VULKAN_VERSION=1000000
@@ -87,7 +109,11 @@ TARGET_PLATFORM="vma_${OS_NAME}_${ARCH_NAME}.${LIB_EXTENSION}"
 
 # Compile the VMA library
 echo "Compiling VulkanMemoryAllocator..."
-g++ -c -I "$VMA_GIT_PATH/include" -I "$VULKAN_SDK/include" $CXXFLAGS "$BUILD_DIR/vk_mem_alloc.cpp" -o "$BUILD_DIR/vk_mem_alloc.o"
+g++ -c \
+	-I "$VMA_GIT_PATH/include" \
+	-I "$VULKAN_SDK/include" \
+	$CXXFLAGS "$BUILD_DIR/vk_mem_alloc.cpp" \
+	-o "$BUILD_DIR/vk_mem_alloc.o"
 if [ $? -ne 0 ]; then
     echo "Compilation failed."
     exit 1
