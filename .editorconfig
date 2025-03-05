@@ -15,6 +15,9 @@ insert_final_newline = ignore
 [*.md]
 trim_trailing_whitespace = false
 
+[*.lua]
+indent_style = space
+
 [*.bat]
 indent_style = tab
 end_of_line = crlf

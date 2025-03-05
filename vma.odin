@@ -1,33 +1,35 @@
 package vma
 
 when ODIN_OS == .Linux || ODIN_OS == .Darwin {
-	@(require) foreign import stdcpp "system:c++"
+	@(require, extra_linker_flags="-lstdc++") foreign import stdcpp "system:c++"
 }
 
 when ODIN_OS == .Windows {
 	when ODIN_ARCH == .amd64 {
-		foreign import vma_lib "vma_windows_x64.lib"
+		foreign import _lib_ "vma_windows_x86_64.lib"
 	} else when ODIN_ARCH == .arm64 {
-		foreign import vma_lib "vma_windows_arm64.lib"
+		foreign import _lib_ "vma_windows_ARM64.lib"
+	} else {
+		#panic("Unsupported architecture for VMA library on Windows")
 	}
 } else when ODIN_OS == .Darwin {
 	when ODIN_ARCH == .amd64 {
-		@(extra_linker_flags="-lstdc++")
-		foreign import vma_lib "vma_darwin_x64.a"
+		foreign import _lib_ "libvma_macosx_x86_64.a"
 	} else when ODIN_ARCH == .arm64 {
-		@(extra_linker_flags="-lstdc++")
-		foreign import vma_lib "vma_darwin_arm64.a"
+		foreign import _lib_ "libvma_macosx_ARM64.a"
+	} else {
+		#panic("Unsupported architecture for VMA library on MacOSX")
 	}
 } else when ODIN_OS == .Linux {
 	when ODIN_ARCH == .amd64 {
-		@(extra_linker_flags="-lstdc++")
-		foreign import vma_lib "vma_linux_x64.a"
+		foreign import _lib_ "libvma_linux_x86_64.a"
 	} else when ODIN_ARCH == .arm64 {
-		@(extra_linker_flags="-lstdc++")
-		foreign import vma_lib "vma_linux_arm64.a"
+		foreign import _lib_ "libvma_linux_ARM64.a"
+	} else {
+		#panic("Unsupported architecture for VMA library on Linux")
 	}
 } else {
-	#panic("Unsupported platform for VMA library")
+	foreign import _lib_ "system:libvma"
 }
 
 // Vendor
@@ -561,7 +563,7 @@ create_vulkan_functions :: proc() -> (procedures: Vulkan_Functions) {
 
 // odinfmt: disable
 @(default_calling_convention = "c")
-foreign vma_lib {
+foreign _lib_ {
 	// Creates `Allocator` object.
 	@(link_name = "vmaCreateAllocator")
 	create_allocator :: proc(
