@@ -86,6 +86,31 @@ local function downloadDependencies()
         VULKAN_HEADERS_VERSION)
 end
 
+local function generateBuildFile()
+    local implFile = path.join(BUILD_DIR, "build.bat")
+    local f = assert(io.open(implFile, "w"))
+    f:write(string.format([[
+@echo off
+setlocal enabledelayedexpansion
+
+:: Setup tooling
+call vcvars64.bat || exit /b 1
+
+:: Compile the VMA library
+call cl /c ^
+	/I %s ^
+	/I %s ^
+	/MT /O1 /DNDEBUG /Fo.\ .\vk_mem_alloc.cpp || exit /b 1
+call lib .\vk_mem_alloc.obj /OUT:.\..\vma_windows_x86_64.lib || exit /b 1
+
+echo Done.
+
+endlocal
+]], path.join(VMA_DIR, "include"),
+    path.join(VULKAN_HEADERS_DIR, "include")))
+    f:close()
+end
+
 local function generateImplFile(vulkanVersion)
     local implFile = path.join(BUILD_DIR, "vk_mem_alloc.cpp")
     local f = assert(io.open(implFile, "w"))
@@ -120,6 +145,7 @@ workspace "vma"
     }
     local vmaVersion = vmaVersionMap[_OPTIONS["vk-version"]] or vmaVersionMap["1"]
     generateImplFile(tonumber(vmaVersion))
+    generateBuildFile()
 
     -- Define all supported platforms
     platforms { "x86_64", "ARM64" }  -- Add "x86" or others if needed
