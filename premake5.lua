@@ -18,8 +18,8 @@ if _PREMAKE_VERSION < "5.0" then
 end
 
 -- Constants and options
-VMA_VERSION = "v3.2.1"
-VULKAN_HEADERS_VERSION = "v1.4.307"
+VMA_VERSION = "v3.3.0"
+VULKAN_HEADERS_VERSION = "v1.4.337"
 
 -- Utility functions
 local redirectNul = (os.host() == "windows") and ">nul 2>&1" or ">/dev/null 2>&1"
@@ -29,24 +29,9 @@ local function hasCommand(cmd)
 end
 
 local function getOsAndArchitecture()
-    local osName = os.host()
-    local arch
-    if osName == "windows" then
-        local procArch =
-            os.getenv("PROCESSOR_ARCHITEW6432") or os.getenv("PROCESSOR_ARCHITECTURE") or "x86"
-        procArch = procArch:lower()
-        arch = ({ amd64 = "x86_64", arm64 = "ARM64", x86 = "x86" })[procArch] or "x86"
-    else
-        local unameArch = os.outputof("uname -m") or ""
-        arch = ({
-            x86_64 = "x86_64",
-            aarch64 = "ARM64",
-            arm64 = "ARM64",
-            i386 = "x86",
-            i686 = "x86"
-        })[unameArch:lower()] or (os.is64bit() and "x86_64" or "x86")
-    end
-    return osName, arch
+    local target_arch = os.targetarch()
+    if target_arch == nil then target_arch = os.hostarch() end
+    return os.target(), target_arch:lower()
 end
 
 -- Setup functions
@@ -89,25 +74,63 @@ end
 local function generateBuildFile()
     local implFile = path.join(BUILD_DIR, "build.bat")
     local f = assert(io.open(implFile, "w"))
-    f:write(string.format([[
+
+    local include_vma = path.join(VMA_DIR, "include")
+    local include_vulkan = path.join(VULKAN_HEADERS_DIR, "include")
+
+    local content = [[
 @echo off
 setlocal enabledelayedexpansion
 
-:: Setup tooling
-call vcvars64.bat || exit /b 1
+where /Q cl.exe || (
+    set __VSCMD_ARG_NO_LOGO=1
+    for /f "tokens=*" %%i in ('"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath') do set VS=%%i
+    if "!VS!" equ "" (
+        echo ERROR: MSVC installation not found
+        exit /b 1
+    )
+    call "!VS!\Common7\Tools\vsdevcmd.bat" -arch=x64 -host_arch=x64 || exit /b 1
+)
+
+if "%VSCMD_ARG_TGT_ARCH%" neq "x64" (
+    if "%ODIN_IGNORE_MSVC_CHECK%" == "" (
+        echo ERROR: please run this from MSVC x64 native tools command prompt, 32-bit target is not supported!
+        exit /b 1
+    )
+)
+
+echo Building VMA static library...
 
 :: Compile the VMA library
-call cl /c ^
-	/I %s ^
-	/I %s ^
-	/MT /O1 /DNDEBUG /Fo.\ .\vk_mem_alloc.cpp || exit /b 1
-call lib .\vk_mem_alloc.obj /OUT:.\..\vma_windows_x86_64.lib || exit /b 1
+cl /c /EHsc /std:c++17 ^
+    /MD ^
+    /O2 ^
+    /DNDEBUG ^
+    /I "]] .. include_vma .. [[" ^
+    /I "]] .. include_vulkan .. [[" ^
+    /Fo:vk_mem_alloc.obj ^
+    vk_mem_alloc.cpp
+if errorlevel 1 (
+    echo ERROR: Compilation failed
+    exit /b 1
+)
+
+:: Create the static library
+lib vk_mem_alloc.obj /OUT:..\vma_windows_x86_64.lib
+if errorlevel 1 (
+    echo ERROR: Linking lib failed
+    exit /b 1
+)
+
+:: Cleanup
+del vk_mem_alloc.obj
 
 echo Done.
 
 endlocal
-]], path.join(VMA_DIR, "include"),
-    path.join(VULKAN_HEADERS_DIR, "include")))
+]]
+
+    f:write(content)
     f:close()
 end
 
@@ -147,14 +170,18 @@ workspace "vma"
     generateImplFile(tonumber(vmaVersion))
     generateBuildFile()
 
-    -- Define all supported platforms
-    platforms { "x86_64", "ARM64" }  -- Add "x86" or others if needed
-    -- Set default platform based on detected arch
-    defaultplatform(arch)  -- Assumes arch is "x86_64" or "ARM64"
+    -- Define supported platforms
+    platforms { "x86_64", "ARM64" }
+    defaultplatform(arch)
 
 project "vma"
     kind "StaticLib"
     language "C++"
+    cppdialect "C++17"
+    staticruntime "Off"
+    exceptionhandling "On"
+    rtti "Off"
+
     targetdir "./"
     targetname("vma_%{os.host()}_%{cfg.platform}")
 
@@ -162,17 +189,39 @@ project "vma"
         path.join(VMA_DIR, "include"),
         path.join(VULKAN_HEADERS_DIR, "include")
     }
-    files { path.join(BUILD_DIR, "vk_mem_alloc.cpp") }
+
+    files {
+        path.join(BUILD_DIR, "vk_mem_alloc.cpp"),
+    }
 
     filter "system:windows"
-        buildoptions { "/MT" }
+        buildoptions { "/MD", "/O2" }
+    filter { "system:windows", "configurations:Debug" }
+        buildoptions { "/MDd" }
+
+    filter { "system:linux or system:macosx or system:bsd" }
+        buildoptions {
+            "-fPIC",
+            "-Wall",
+            "-Wextra",
+        }
+        pic "On"
+
+    filter "system:macosx"
+        buildoptions {
+            "-stdlib=libc++",
+        }
+
     filter "system:linux or system:macosx"
         buildoptions { "-fPIC" }
 
     filter "configurations:Debug"
         defines { "DEBUG" }
-        symbols "On"
+        symbols "Full"
+        optimize "Off"
+
     filter "configurations:Release"
         defines { "NDEBUG" }
-        optimize "On"
+        optimize "Speed"
         symbols "Off"
+        flags { "NoMinimalRebuild" }
