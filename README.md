@@ -1,6 +1,6 @@
 # Odin VMA
 
-Bindings for [Vulkan Memory Allocator][] **v3.2.1** in [Odin Programming Language][].
+Bindings for [Vulkan Memory Allocator][] **v3.3.0** in [Odin Programming Language][].
 
 ## Basic Usage
 
