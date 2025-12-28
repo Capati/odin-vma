@@ -563,6 +563,28 @@ create_vulkan_functions :: proc() -> (procedures: Vulkan_Functions) {
 	return
 }
 
+VK_VERSION_MAJOR :: proc(version: u32) -> u32 {
+	return (version >> 22) & 0x7F
+}
+
+VK_VERSION_MINOR :: proc(version: u32) -> u32 {
+	return (version >> 12) & 0x3FF
+}
+
+VK_VERSION_PATCH :: proc(version: u32) -> u32 {
+	return version & 0xFFF
+}
+
+// Convert between Vulkan's bit-packed version to decimal "MMmmppp" format.
+//
+// `api_version` should be a value from the api or constructed with `vk.MAKE_VERSION`.
+VK_API_VERSION_TO_DECIMAL :: proc(api_version: u32) -> u32 {
+    major := VK_VERSION_MAJOR(api_version) * 1000000
+    minor := VK_VERSION_MINOR(api_version) * 1000
+    patch := VK_VERSION_PATCH(api_version)
+    return major + minor + patch
+}
+
 // odinfmt: disable
 @(default_calling_convention = "c")
 foreign _lib_ {
