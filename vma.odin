@@ -14,7 +14,7 @@ when ODIN_OS == .Windows {
 	when ODIN_ARCH == .amd64 {
 		foreign import _lib_ { "libvma_macosx_x86_64.a", "system:stdc++" }
 	} else when ODIN_ARCH == .arm64 {
-		foreign import _lib_ { "libvma_macosx_x86_64.a", "system:stdc++" }
+		foreign import _lib_ { "libvma_macosx_ARM64.a", "system:stdc++" }
 	} else {
 		#panic("Unsupported architecture for VMA library on MacOSX")
 	}
@@ -22,7 +22,7 @@ when ODIN_OS == .Windows {
 	when ODIN_ARCH == .amd64 {
 		foreign import _lib_ { "libvma_linux_x86_64.a", "system:stdc++" }
 	} else when ODIN_ARCH == .arm64 {
-		foreign import _lib_ { "libvma_linux_x86_64.a", "system:stdc++" }
+		foreign import _lib_ { "libvma_linux_ARM64.a", "system:stdc++" }
 	} else {
 		#panic("Unsupported architecture for VMA library on Linux")
 	}
