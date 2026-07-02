@@ -2,27 +2,27 @@ package vma
 
 when ODIN_OS == .Windows {
 	when ODIN_ARCH == .amd64 {
-		@(extra_linker_flags="/NODEFAULTLIB:libcmt /NODEFAULTLIB:libucrt")
+		@(extra_linker_flags = "/NODEFAULTLIB:libcmt /NODEFAULTLIB:libucrt")
 		foreign import _lib_ "vma_windows_x86_64.lib"
 	} else when ODIN_ARCH == .arm64 {
-		@(extra_linker_flags="/NODEFAULTLIB:libcmt /NODEFAULTLIB:libucrt")
+		@(extra_linker_flags = "/NODEFAULTLIB:libcmt /NODEFAULTLIB:libucrt")
 		foreign import _lib_ "vma_windows_ARM64.lib"
 	} else {
 		#panic("Unsupported architecture for VMA library on Windows")
 	}
 } else when ODIN_OS == .Darwin {
 	when ODIN_ARCH == .amd64 {
-		foreign import _lib_ { "libvma_macosx_x86_64.a", "system:stdc++" }
+		foreign import _lib_ {"libvma_macosx_x86_64.a", "system:stdc++"}
 	} else when ODIN_ARCH == .arm64 {
-		foreign import _lib_ { "libvma_macosx_ARM64.a", "system:stdc++" }
+		foreign import _lib_ {"libvma_macosx_ARM64.a", "system:stdc++"}
 	} else {
 		#panic("Unsupported architecture for VMA library on MacOSX")
 	}
 } else when ODIN_OS == .Linux {
 	when ODIN_ARCH == .amd64 {
-		foreign import _lib_ { "libvma_linux_x86_64.a", "system:stdc++" }
+		foreign import _lib_ {"libvma_linux_x86_64.a", "system:stdc++"}
 	} else when ODIN_ARCH == .arm64 {
-		foreign import _lib_ { "libvma_linux_ARM64.a", "system:stdc++" }
+		foreign import _lib_ {"libvma_linux_ARM64.a", "system:stdc++"}
 	} else {
 		#panic("Unsupported architecture for VMA library on Linux")
 	}
@@ -32,6 +32,9 @@ when ODIN_OS == .Windows {
 
 // Vendor
 import vk "vendor:vulkan"
+
+// VMA Version - vk.MAKE_VERSION()
+VMA_VERSION: u32 : (3 << 22) | (4 << 12) | (0)
 
 // Flags for created `Allocator`.
 Allocator_Create_Flags :: bit_set[Allocator_Create_Flag;u32]
@@ -343,6 +346,8 @@ Vulkan_Functions :: struct {
 	get_device_buffer_memory_requirements:      vk.ProcGetDeviceBufferMemoryRequirementsKHR,
 	get_device_image_memory_requirements:       vk.ProcGetDeviceImageMemoryRequirementsKHR,
 	get_memory_win32_handle_khr:                vk.ProcGetMemoryWin32HandleKHR,
+	get_memory_win32_handle2_khr:               vk.ProcGetMemoryWin32HandleKHR,
+	get_physical_device_properties2:            vk.ProcGetPhysicalDeviceProperties2KHR,
 }
 
 // Description of a Allocator to be created.
@@ -424,6 +429,7 @@ Allocation_Create_Info :: struct {
 	pool:             Pool,
 	user_data:        rawptr,
 	priority:         f32,
+	min_alignment:    vk.DeviceSize,
 }
 
 // Describes parameter of created #VmaPool.
@@ -554,6 +560,8 @@ create_vulkan_functions :: proc() -> (procedures: Vulkan_Functions) {
 		get_device_buffer_memory_requirements      = vk.GetDeviceBufferMemoryRequirements,
 		get_device_image_memory_requirements       = vk.GetDeviceImageMemoryRequirements,
 		get_memory_win32_handle_khr                = vk.GetMemoryWin32HandleKHR,
+		get_memory_win32_handle2_khr               = vk.GetMemoryWin32HandleKHR,
+		get_physical_device_properties2            = vk.GetPhysicalDeviceProperties2KHR,
 	}
 
 	return
@@ -575,10 +583,10 @@ VK_VERSION_PATCH :: proc(version: u32) -> u32 {
 //
 // `api_version` should be a value from the api or constructed with `vk.MAKE_VERSION`.
 VK_API_VERSION_TO_DECIMAL :: proc(api_version: u32) -> u32 {
-    major := VK_VERSION_MAJOR(api_version) * 1000000
-    minor := VK_VERSION_MINOR(api_version) * 1000
-    patch := VK_VERSION_PATCH(api_version)
-    return major + minor + patch
+	major := VK_VERSION_MAJOR(api_version) * 1000000
+	minor := VK_VERSION_MINOR(api_version) * 1000
+	patch := VK_VERSION_PATCH(api_version)
+	return major + minor + patch
 }
 
 // odinfmt: disable
@@ -799,6 +807,26 @@ foreign _lib_ {
 		allocation: ^Allocation,
 		allocation_info: ^Allocation_Info) -> vk.Result ---
 
+	// General purpose allocation of a dedicated memory.
+
+	// This function is similar allocate_memory(), but
+	// it always allocates dedicated memory - flag
+	// #VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT is implied.
+	//
+	// It offers additional parameter `memory_allocate_next`,
+	// which can be used to attach `pNext` chain to the `vk.MemoryAllocateInfo`
+	// structure.
+	//
+	// It can be useful for importing external memory. For more information, see \ref other_api_interop.
+	@(link_name = "vmaAllocateDedicatedMemory")
+	allocate_dedicated_memory :: proc(
+		allocator: Allocator,
+		#by_ptr memory_requirements: vk.MemoryRequirements,
+		#by_ptr create_info: Allocation_Create_Info,
+		memory_allocate_next: rawptr,
+		allocation: ^Allocation,
+		allocation_info: ^Allocation_Info) -> vk.Result ---
+
 	// General purpose memory allocation for multiple allocation objects at once.
 	//
 	// - `allocator` Allocator object.
@@ -998,6 +1026,52 @@ foreign _lib_ {
 		allocation: Allocation,
 		target_process: vk.HANDLE,
 		handle: ^vk.HANDLE) -> vk.Result ---
+
+
+	// Given an allocation, returns Win32 handle that may be imported by other
+	// processes or APIs.
+	//
+	// -  `target_process` Must be a valid handle to target process or null. If
+	//    it's null, the procedure returns handle for the current process.
+	// -   handleType Type of handle to be exported. It should be one of:
+    //       `VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR`
+    //       `VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR`
+    //       `VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT_KHR`
+    //       `VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT_KHR`
+    //       `VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_HEAP_BIT_KHR`
+    //       `VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT_KHR`
+	// - [out] `handle` Output parameter that returns the handle.
+	//
+	// The procedure fills `handle` with handle that can be used in target
+	// process. The handle is fetched using procedure
+	// `vk.GetMemoryWin32HandleKHR`. When no longer needed, you must close it
+	// using:
+	//
+	// ```
+	// win32.CloseHandle(handle)
+	// ```
+	//
+	// You can close it any time, before or after destroying the allocation
+	// object. It is reference-counted internally by Windows.
+	//
+	// Note the handle is returned for the entire `vk.DeviceMemory` block that the
+	// allocation belongs to. If the allocation is sub-allocated from a larger
+	// block, you may need to consider the offset of the allocation
+	// (`Allocation_Info.offset`).
+	//
+	// If the procedure fails with `vk.ERROR_FEATURE_NOT_PRESENT` error code,
+	// please double-check that `Vulkan_Functions.get_memory_win32_handle2_khr`
+	// procedure pointer is set, e.g. either by using
+	// `VMA_DYNAMIC_VULKAN_FUNCTIONS` or by manually passing it through
+	// `Allocator_Create_Info.vulkan_functions`.
+	@(link_name = "vmaGetMemoryWin32Handle2")
+	get_memory_win32_handle2 :: proc(
+		allocator: Allocator,
+		allocation: Allocation,
+		handle_type: vk.ExternalMemoryHandleTypeFlag,
+		target_process: vk.HANDLE,
+		handle: ^vk.HANDLE,
+		) -> vk.Result ---
 
 	// Given an allocation, returns Property Flags of its memory type.
 	//
@@ -1476,12 +1550,36 @@ foreign _lib_ {
 	// `min_alignment` which allows to specify custom, minimum alignment to be
 	// used when placing the buffer inside a larger memory block, which may be
 	// needed e.g. for interop with OpenGL.
+	//
+	// This function in obsolete since new VmaAllocationCreateInfo::minAlignment
+	// member allows specifying custom alignment while using any allocation
+	// function, like the standard create_buffer().
+	@(deprecated="Use Allocation_Create_Info.min_alignment instead")
 	@(link_name = "vmaCreateBufferWithAlignment")
 	create_buffer_with_alignment :: proc(
 		allocator: Allocator,
 		#by_ptr buffer_create_info: vk.BufferCreateInfo,
 		#by_ptr allocation_create_info: Allocation_Create_Info,
 		min_alignment: vk.DeviceSize,
+		buffer: ^vk.Buffer,
+		allocation: ^Allocation,
+		allocation_info: ^Allocation_Info) -> vk.Result ---
+
+	// Creates a dedicated buffer while offering extra parameter `memory_allocate_next`.
+	//
+	// This function is similar create_buffer(), but
+	// it always allocates dedicated memory for the buffer -
+	// flag #VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT is implied.
+	// It offers additional parameter `memory_allocate_next`,
+	// which can be used to attach `pNext` chain to the `vk.MemoryAllocateInfo`
+	// structure.
+	// It can be useful for importing external memory.
+	@(link_name = "vmaCreateDedicatedBuffer")
+	create_dedicated_buffer :: proc(
+		allocator: Allocator,
+		#by_ptr buffer_create_info: vk.BufferCreateInfo,
+		#by_ptr allocation_create_info: Allocation_Create_Info,
+		memory_allocate_next: rawptr,
 		buffer: ^vk.Buffer,
 		allocation: ^Allocation,
 		allocation_info: ^Allocation_Info) -> vk.Result ---
@@ -1583,6 +1681,27 @@ foreign _lib_ {
 		allocator: Allocator,
 		#by_ptr image_create_info: vk.ImageCreateInfo,
 		#by_ptr allocation_create_info: Allocation_Create_Info,
+		image: ^vk.Image,
+		allocation: ^Allocation,
+		allocation_info: ^Allocation_Info) -> vk.Result ---
+
+	// Function similar to vmaCreateDedicatedBuffer() but for images.
+
+	// This function is similar create_image(), but
+	// it always allocates dedicated memory for the image -
+	// flag #VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT is implied.
+	//
+	// It offers additional parameter `memory_allocate_next`,
+	// which can be used to attach `pNext` chain to the
+	// `vk.MemoryAllocateInfo` structure.
+	//
+	// It can be useful for importing external memory.
+	@(link_name = "vmaCreateDedicatedImage")
+	create_dedicated_image :: proc(
+		allocator: Allocator,
+		#by_ptr image_create_info: vk.ImageCreateInfo,
+		#by_ptr allocation_create_info: Allocation_Create_Info,
+		memory_allocate_next: rawptr,
 		image: ^vk.Image,
 		allocation: ^Allocation,
 		allocation_info: ^Allocation_Info) -> vk.Result ---
