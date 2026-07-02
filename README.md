@@ -105,7 +105,7 @@ If you do not have Visual Studio installed, you can use the **Build Tools for Vi
       (Vulkan 1.3).
 
     ```bash
-    premake5 --vk-version=3 gmake2  # 1003000 (1.3)
+    premake5 --vk-version=3 gmake  # 1003000 (1.3)
     # On macOS, you can also use Xcode:
     premake5 --vk-version=3 xcode4
     ```
