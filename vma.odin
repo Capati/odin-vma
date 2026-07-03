@@ -2146,6 +2146,7 @@ foreign vmalib {
 	// **Deprecated**: This function in obsolete since new
 	// `AllocationCreateInfo.minAlignment` member allows specifying custom alignment
 	// while using any allocation function, like the standard `vma.CreateBuffer()`.
+	@(deprecated="Use AllocationCreateInfo.minAlignment instead")
 	CreateBufferWithAlignment :: proc(
 		allocator: Allocator,
 		#by_ptr pBufferCreateInfo: vk.BufferCreateInfo,
