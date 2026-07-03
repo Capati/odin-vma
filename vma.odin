@@ -40,6 +40,9 @@ when ODIN_OS == .Windows {
 // Vendor
 import vk "vendor:vulkan"
 
+// VMA Version - vk.MAKE_VERSION()
+VMA_VERSION: u32 : (3 << 22) | (4 << 12) | (0)
+
 // Flags for created `Allocator`.
 AllocatorCreateFlags :: bit_set[AllocatorCreateFlag; vk.Flags]
 AllocatorCreateFlag :: enum i32 {
