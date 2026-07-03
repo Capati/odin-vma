@@ -224,4 +224,4 @@ project "vma"
         defines { "NDEBUG" }
         optimize "Speed"
         symbols "Off"
-        flags { "NoMinimalRebuild" }
+        minimalrebuild "Off"
