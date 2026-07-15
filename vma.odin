@@ -2478,6 +2478,9 @@ create_vulkan_functions :: proc() -> (functions: VulkanFunctions) {
     if functions.GetPhysicalDeviceMemoryProperties2KHR == nil {
         functions.GetPhysicalDeviceMemoryProperties2KHR = vk.GetPhysicalDeviceMemoryProperties2
     }
+    if functions.GetPhysicalDeviceProperties2KHR == nil {
+        functions.GetPhysicalDeviceProperties2KHR = vk.GetPhysicalDeviceProperties2
+    }
     if functions.GetDeviceBufferMemoryRequirements == nil {
         functions.GetDeviceBufferMemoryRequirements = vk.GetDeviceBufferMemoryRequirements
     }
